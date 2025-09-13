@@ -17,7 +17,25 @@ namespace SecurityBoxFunctions.Model.Entities
 
     public sealed class LoginRequest
     {
-        public string? Email { get; set; }
-        public string? Password { get; set; }
+        public string Email { get; set; }
+        public string Password { get; set; }
+    }
+
+    public sealed class Users
+    {
+        public int UserID { get; set; }
+        public string UserName { get; set; }
+        public string Email { get; set; }
+        public string PhoneNo { get; set; }
+    }
+
+    public sealed class IotSignal
+    {
+        public int BoxID { get; set; }
+        public string? EventCode { get; set; }
+        public int DoorState { get; set; }
+        public int FingerprintNum { get; set; }
+        public double TotalWeight { get; set; }
+        public int BoxPosition { get; set; }
     }
 }

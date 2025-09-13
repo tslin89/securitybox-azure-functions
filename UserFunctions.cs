@@ -2,6 +2,7 @@ using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
+using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Data.SqlClient;
@@ -12,6 +13,14 @@ using BCrypt.Net;
 using System.IdentityModel.Tokens.Jwt;
 using Microsoft.IdentityModel.Tokens;
 using System.Security.Claims;
+using SecurityBoxFunctions.Library;
+using Microsoft.Azure.SignalR.Management;
+using System.Text.Json.Serialization;
+using Microsoft.Azure.SignalR.Management;
+using System.Text.Json.Serialization;
+using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
+using Microsoft.AspNetCore.Http.HttpResults;
+
 
 namespace Winter.SecurityBox;
 
@@ -53,7 +62,8 @@ public partial class UserFunctions
             string cs = _configuration["SqlConnectionString"];
             int userId;
             string emailFromDb;
-            string passwordHash;
+            string passwordFromDb;
+            Users user;
 
             await using (var conn = new SqlConnection(cs))
             {
@@ -61,12 +71,11 @@ public partial class UserFunctions
 
                 // todo: inclue password hash in query
                 var cmd = new SqlCommand(
-                    @"SELECT UserID, UserName, Email
+                    @"SELECT UserID, UserName, Email, Password, PhoneNo
                       FROM Users 
                       WHERE Email = @Email", conn);
 
                 cmd.Parameters.AddWithValue("@Email", login.Email);
-                cmd.Parameters.AddWithValue("@PasswordHash", BCrypt.Net.BCrypt.HashPassword(login.Password));
 
                 await using var reader = await cmd.ExecuteReaderAsync();
                 if (!await reader.ReadAsync())
@@ -74,37 +83,56 @@ public partial class UserFunctions
                     return new UnauthorizedObjectResult(new ResponseObject
                     {
                         Status = -1,
-                        Message = "Invalid credentials for user " + login.Email
+                        Message = "User not found for " + login.Email
                     });
                 }
 
-                userId = reader.GetInt32(reader.GetOrdinal("UserID"));
-                emailFromDb = reader.GetString(reader.GetOrdinal("Email"));
-                //passwordHash = reader.GetString(reader.GetOrdinal("PasswordHash"));
+                string passwordFromDB = reader.GetString(reader.GetOrdinal("Password"));
 
-                // Temporary: since we don't yet have passwords in the DB
-                passwordHash = BCrypt.Net.BCrypt.HashPassword($"{userId}{emailFromDb}");
+                if (login.Password != passwordFromDB)
+                {
+                    return new UnauthorizedObjectResult(new ResponseObject
+                    {
+                        Status = -1,
+                        Message = "Your password is incorrect."
+                    });
+                }
 
+                user = new Users
+                {
+                    UserID = reader.GetInt32(reader.GetOrdinal("UserID")),
+                    UserName = reader.GetString(reader.GetOrdinal("UserName")),
+                    Email = reader.GetString(reader.GetOrdinal("Email")),
+                    PhoneNo = reader.GetString(reader.GetOrdinal("PhoneNo"))
+                };
+
+                // I will not use server side hashing for this project as the focus is not on web app security. encrypted value will be directly compared.
+                // passwordHash = BCrypt.Net.BCrypt.HashPassword($"{userId}{emailFromDb}");
             }
 
             //bool ok = BCrypt.Net.BCrypt.Verify(login.Password, passwordHash);
             //if (!ok)
             //    return new UnauthorizedObjectResult(new { error = "Invalid credentials" });
 
-            // 4) Issue JWT
-            // var token = CreateJwt(
-            //     userId,
-            //     emailFromDb,
-            //     _configuration["Jwt:Key"],       // a long random secret
-            //     _configuration["Jwt:Issuer"],    // e.g. https://yourdomain
-            //     _configuration["Jwt:Audience"]   // e.g. your frontend origin
-            // );
+            // initiate SignalR connection info
+            //var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
+            //response.WriteAsJsonAsync(connectionInfo);
+            
 
-            ResponseObject responseObj = new ResponseObject();
+            ResponseObject responseObj = null;
+
+            //var signalR = await GetSignalRInfoAsync("alerts", user.UserID.ToString());
+
+            string token = Utilities.GenerateJWTToken(user.Email,
+                _configuration["Jwt:Key"],
+                _configuration["Jwt:Issuer"],
+                _configuration["Jwt:Audience"]);
+
+            responseObj = new ResponseObject();
             responseObj.Data = new
             {
-                Token = passwordHash, //token, // change here later
-                User = new { id = userId, email = emailFromDb }
+                Token = token,
+                User = user
             };
 
             return new OkObjectResult(responseObj);
@@ -116,32 +144,18 @@ public partial class UserFunctions
         }
     }
 
-    // Minimal JWT creator
-    private static string CreateJwt(int userId, string email, string? key, string? issuer, string? audience)
+    [Function("negotiateSignalR")]
+    public async Task<HttpResponseData> Run(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post")] HttpRequestData req,
+        [SignalRConnectionInfoInput(HubName = "alerts", ConnectionStringSetting = "AzureSignalRConnectionString")] SignalRConnectionInfo connectionInfo)
     {
-        if (string.IsNullOrWhiteSpace(key))
-            throw new InvalidOperationException("JWT key not configured");
+        ResponseObject responseObj = new ResponseObject();
+        responseObj.Data = connectionInfo;
 
-        var creds = new SigningCredentials(
-            new SymmetricSecurityKey(System.Text.Encoding.UTF8.GetBytes(key)),
-            SecurityAlgorithms.HmacSha256);
+        var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
+        await response.WriteAsJsonAsync(responseObj);
 
-        var claims = new[]
-        {
-            new Claim(JwtRegisteredClaimNames.Sub, userId.ToString()),
-            new Claim(JwtRegisteredClaimNames.Email, email),
-            new Claim(JwtRegisteredClaimNames.Jti, Guid.NewGuid().ToString())
-        };
-
-        var jwt = new JwtSecurityToken(
-            issuer: issuer,
-            audience: audience,
-            claims: claims,
-            notBefore: DateTime.UtcNow,
-            expires: DateTime.UtcNow.AddHours(1),
-            signingCredentials: creds);
-
-        return new JwtSecurityTokenHandler().WriteToken(jwt);
+        return response;
     }
 
     [GeneratedRegex(@"^[^@\s]+@[^@\s]+\.[^@\s]+$")]
