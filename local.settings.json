@@ -8,7 +8,10 @@
     "Jwt:Issuer": "winter-security-system",
     "Jwt:Audience": "securitybox-functions",
     "AzureSignalRConnectionString": "Endpoint=https://security-box-signalr.service.signalr.net;AccessKey=Ah27aLPGhTq8Fh4RX5Xochs0tNYYs1mVMbyZWgKGIwfOVSOZfW8ZJQQJ99BIACL93NaXJ3w3AAAAASRSGioS;Version=1.0;",
-    "IoTHubConnectionString": "Endpoint=sb://ihsuprodsyres003dednamespace.servicebus.windows.net/;SharedAccessKeyName=iothubowner;SharedAccessKey=epUv281vcA0jc9q3Iu2R3OLBQFXLEN7SgAIoTOtnsnE=;EntityPath=iothub-ehub-security-b-56317008-6d7f4c3130"
+    "IoTHubConnectionString": "Endpoint=sb://ihsuprodsyres003dednamespace.servicebus.windows.net/;SharedAccessKeyName=iothubowner;SharedAccessKey=epUv281vcA0jc9q3Iu2R3OLBQFXLEN7SgAIoTOtnsnE=;EntityPath=iothub-ehub-security-b-56317008-6d7f4c3130",
+    "Vapid:PublicKey": "BCUVoQ_umbRV53LwdbPqq7jPHPLMpLi_drkf-PwZZb34LIVZ6DOMQW2ZbRddAAh-BSgMF_Hk8gOPfIREcUYV9ac",
+    "Vapid:PrivateKey": "NSTofdCxzL5XK1Hjos5O59ipL_Zesl_S5SHc9Iw_EpE",
+    "Vapid:Subject": "https://localhost"
   },
   "Host": {
     "CORS": "http://localhost:5173,http://localhost:3000",

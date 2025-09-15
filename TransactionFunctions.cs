@@ -97,8 +97,8 @@ public class TransactionFunctions
                                 TimeStamp = reader.GetDateTime(reader.GetOrdinal("TimeStamp")),
                                 BoxID = reader.GetInt64(reader.GetOrdinal("BoxID")),
                                 EventCode = reader.GetString(reader.GetOrdinal("EventCode")),
-                                DoorState = reader.IsDBNull(reader.GetOrdinal("DoorState")) ? null : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("DoorState"))),
-                                FingerprintNum = reader.IsDBNull(reader.GetOrdinal("FingerprintNum")) ? null : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("FingerprintNum"))),
+                                DoorState = reader.IsDBNull(reader.GetOrdinal("DoorState")) ? null : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("DoorState"))),
+                                FingerprintNum = reader.IsDBNull(reader.GetOrdinal("FingerprintNum")) ? null : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("FingerprintNum"))),
                                 TotalWeight = reader.IsDBNull(reader.GetOrdinal("TotalWeight")) ? null : Convert.ToSingle(reader.GetValue(reader.GetOrdinal("TotalWeight"))),
                                 BoxPosition = reader.IsDBNull(reader.GetOrdinal("BoxPosition")) ? null : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("BoxPosition")))
                             });

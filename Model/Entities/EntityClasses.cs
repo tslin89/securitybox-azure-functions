@@ -9,8 +9,8 @@ namespace SecurityBoxFunctions.Model.Entities
         public DateTime TimeStamp { get; set; }
         public long BoxID { get; set; }
         public string EventCode { get; set; }
-        public int? DoorState { get; set; }
-        public int? FingerprintNum { get; set; }
+        public long? DoorState { get; set; }
+        public long? FingerprintNum { get; set; }
         public float? TotalWeight { get; set; }
         public long? BoxPosition { get; set; }
     }
