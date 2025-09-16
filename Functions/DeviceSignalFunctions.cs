@@ -12,6 +12,7 @@ using WebPush;
 using Azure.Messaging.EventHubs;
 using Microsoft.Azure.Functions.Worker;
 using System.Text.Json;
+using System.Data;
 
 namespace Winter.SecurityBox;
 
@@ -56,10 +57,24 @@ public class TestSignals
         var signalRMessages = new List<SignalRMessageAction>();
         var pushTasks = new List<Task>();
 
+        using var conn = new SqlConnection(_configuration["SqlConnectionString"]);
+        await conn.OpenAsync();
         foreach (EventData eventData in events)
         {
             string msg = Encoding.UTF8.GetString(eventData.EventBody.ToArray());
             _logger.LogInformation($"IoT message received: {msg}");
+
+            // save to database
+            var sensorBoxData = JsonSerializer.Deserialize<SecurityBoxData>(msg);
+            if (sensorBoxData.EventCode == "D001" && sensorBoxData.FingerprintNum != 0 && sensorBoxData.UserID != 0)
+            {
+                // update fingerprint number for user
+                await UpdateFingerprintNum(conn, sensorBoxData);
+
+                _logger.LogInformation($"Fingerprint setup completed at IoT device. User: {sensorBoxData.UserID}, FingerprintNum: {sensorBoxData.FingerprintNum}");
+            }
+
+            await SaveToDatabase(conn, sensorBoxData);
 
             signalRMessages.Add(new SignalRMessageAction("newAlert", new object[] { msg }));
 
@@ -71,6 +86,38 @@ public class TestSignals
         await Task.WhenAll(pushTasks);
 
         return signalRMessages.ToArray();
+    }
+
+    private async Task UpdateFingerprintNum(SqlConnection conn, SecurityBoxData data)
+    {
+        var cmd = new SqlCommand(
+            @"UPDATE dbo.Users SET FingerprintNum = @fingerprintNum WHERE UserID = @userID", conn);
+
+        cmd.Parameters.Add("@userID", SqlDbType.Int).Value = data.UserID;
+        cmd.Parameters.Add("@fingerprintNum", SqlDbType.BigInt).Value = data.FingerprintNum;
+
+        await cmd.ExecuteNonQueryAsync();
+    }
+
+    private async Task SaveToDatabase(SqlConnection conn, SecurityBoxData data)
+    {
+        var cmd = new SqlCommand(
+            @"INSERT INTO dbo.SecurityBoxData (
+                TimeStamp, BoxID, EventCode, DoorState, FingerprintNum, TotalWeight, BoxPosition
+            ) 
+            VALUES (
+                @TimeStamp, @BoxID, @EventCode, @DoorState, @FingerprintNum, @TotalWeight, @BoxPosition
+            )", conn);
+
+        cmd.Parameters.Add("@TimeStamp", SqlDbType.DateTime).Value = DateTime.Now;
+        cmd.Parameters.Add("@BoxID", SqlDbType.BigInt).Value = data.BoxID;
+        cmd.Parameters.Add("@EventCode", SqlDbType.NVarChar).Value = (object?)data.EventCode ?? "UNKNOWN";
+        cmd.Parameters.Add("@DoorState", SqlDbType.BigInt).Value = (object?)data.DoorState ?? DBNull.Value;
+        cmd.Parameters.Add("@FingerprintNum", SqlDbType.BigInt).Value = (object?)data.FingerprintNum ?? DBNull.Value;
+        cmd.Parameters.Add("@TotalWeight", SqlDbType.Float).Value = (object?)data.TotalWeight ?? DBNull.Value;
+        cmd.Parameters.Add("@BoxPosition", SqlDbType.BigInt).Value = (object?)data.BoxPosition ?? DBNull.Value;
+
+        await cmd.ExecuteNonQueryAsync();
     }
 
     private async Task<List<StoredPushSubscription>> GetAllSubscriptionsAsync()

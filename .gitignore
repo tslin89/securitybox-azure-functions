@@ -62,3 +62,4 @@ __azurite_db_queue_extent__.json
 __azurite_db_table__.json
 __blobstorage__
 AzuriteConfig
+.DS_Store
