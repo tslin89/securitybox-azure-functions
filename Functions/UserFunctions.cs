@@ -93,11 +93,19 @@ public partial class UserFunctions
 
                 // user
                 if (!await r.ReadAsync())
-                    return new UnauthorizedObjectResult(new ResponseObject { Status = -1, Message = $"User not found for {login.Email}" });
+                    return new OkObjectResult(new ResponseObject
+                    {
+                        Status = (int)CommonEnum.ResponseStatus.Failed,
+                        Message = "User not registered."
+                    });
 
                 var passwordFromDB = r.GetString(r.GetOrdinal("Password"));
                 if (login.Password != passwordFromDB)
-                    return new UnauthorizedObjectResult(new ResponseObject { Status = -1, Message = "Your password is incorrect." });
+                    return new OkObjectResult(new ResponseObject
+                    {
+                        Status = (int)CommonEnum.ResponseStatus.Failed,
+                        Message = "Failed to Login. Please check your credentials."
+                    });
 
                 user = new Users
                 {
@@ -160,6 +168,24 @@ public partial class UserFunctions
 
             return new OkObjectResult(responseObj);
         }
+        catch (SqlException ex) when (ex.Number == 40613 || ex.Number == -2)
+        {
+            _logger.LogError(ex, "UserLogin failed by inactive database");
+            return new OkObjectResult(new ResponseObject
+            {
+                Status = (int)CommonEnum.ResponseStatus.Failed,
+                Message = "Unable to login at this moment. Please try again in 10-30 seconds."
+            });
+        }
+        catch (SqlException ex)
+        {
+            _logger.LogError(ex, "UserLogin failed by database error");
+            return new OkObjectResult(new ResponseObject
+            {
+                Status = (int)CommonEnum.ResponseStatus.Failed,
+                Message = "System is not available. Please contact system administrators."
+            });
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "UserLogin failed");
@@ -173,7 +199,10 @@ public partial class UserFunctions
     [Function("negotiateSignalR")]
     public async Task<HttpResponseData> Run(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post")] HttpRequestData req,
-        [SignalRConnectionInfoInput(HubName = "alerts", ConnectionStringSetting = "AzureSignalRConnectionString")] SignalRConnectionInfo connectionInfo)
+        [SignalRConnectionInfoInput(
+            HubName = "alerts",
+            ConnectionStringSetting = "AzureSignalRConnectionString",
+            UserId = "{query.userId}")] SignalRConnectionInfo connectionInfo)
     {
         ResponseObject responseObj = new ResponseObject();
         responseObj.Data = connectionInfo;

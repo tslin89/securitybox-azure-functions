@@ -13,6 +13,7 @@ using Azure.Messaging.EventHubs;
 using Microsoft.Azure.Functions.Worker;
 using System.Text.Json;
 using System.Data;
+using System.Net;
 
 namespace Winter.SecurityBox;
 
@@ -28,31 +29,31 @@ public class TestSignals
         _configuration = configuration;
     }
 
-    [Function("TriggerSignalR")]
-    [SignalROutput(HubName = "alerts", ConnectionStringSetting = "AzureSignalRConnectionString")]
-    public async Task<SignalRMessageAction[]> SendTestSignalRData(
-    [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post")] HttpRequestData req)
-    {
-        _logger.LogInformation("TestSignalRAlert function triggered");
+    // [Function("TriggerSignalR")]
+    // [SignalROutput(HubName = "alerts", ConnectionStringSetting = "AzureSignalRConnectionString")]
+    // public async Task<SignalRMessageAction[]> SendTestSignalRData(
+    // [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post")] HttpRequestData req)
+    // {
+    //     _logger.LogInformation("TestSignalRAlert function triggered");
 
-        var body = await new StreamReader(req.Body).ReadToEndAsync();
+    //     var body = await new StreamReader(req.Body).ReadToEndAsync();
 
-        var signalRMessages = new List<SignalRMessageAction>();
+    //     var signalRMessages = new List<SignalRMessageAction>();
 
-        signalRMessages.Add(new SignalRMessageAction("newAlert", new[] { body }));
+    //     signalRMessages.Add(new SignalRMessageAction("newAlert", new[] { body }));
 
-        // var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
-        // await response.WriteStringAsync("SignalR test messages sent!");
+    //     // var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
+    //     // await response.WriteStringAsync("SignalR test messages sent!");
 
-        return signalRMessages.ToArray();
-    }
+    //     return signalRMessages.ToArray();
+    // }
 
     [Function("ProcessSecurityBoxIoTMessage")]
     [SignalROutput(HubName = "alerts")]
     public async Task<SignalRMessageAction[]> ProcessIoTSignal(
-            [EventHubTrigger("iothub-ehub-security-b-56317008-6d74c3130",
-            Connection = "IoTHubConnectionString",
-            ConsumerGroup = "func-consumer")] EventData[] events)
+        [EventHubTrigger("iothub-ehub-security-b-56317008-6d74c3130",
+        Connection = "IoTHubConnectionString",
+        ConsumerGroup = "func-consumer")] EventData[] events)
     {
         var signalRMessages = new List<SignalRMessageAction>();
         var pushTasks = new List<Task>();
@@ -79,11 +80,31 @@ public class TestSignals
                     _logger.LogInformation($"Fingerprint setup completed at IoT device. User: {sensorBoxData.UserID}, FingerprintNum: {sensorBoxData.FingerprintNum}");
                 }
 
-                // 1) Trigger SignalR
-                signalRMessages.Add(new SignalRMessageAction("newAlert", new object[] { msg }));
+                var (signalRUserIDs, subs, msgMeta) = await GetNotificationRecipientsAsync(conn, sensorBoxData.BoxID, sensorBoxData.EventCode);
 
-                // 2) Also send Web Push (your helper that loads subs & sends)
-                pushTasks.Add(SendWebPushAsyncForMessageAsync(msg));
+
+                // 1) Trigger SignalR
+                // SignalR per user (keep same Target)
+                //signalRMessages.Add(new SignalRMessageAction("newAlert", new object[] { msg }));
+                foreach (var uid in signalRUserIDs)
+                {
+                    signalRMessages.Add(new SignalRMessageAction("newAlert")  // <-- target here
+                    {
+                        UserId = uid.ToString(),
+                        Arguments = new object[] { msg }  // pass your payload
+                    });
+                }
+
+                // Web Push — build payload once, send to exact subs
+                string boxDesc = msgMeta.BoxDescription ?? $"Box {sensorBoxData.BoxID}";
+                boxDesc = boxDesc.TrimEnd();
+                string boxShort = boxDesc.Length > 20 ? boxDesc[..20] + "..." : boxDesc;
+
+                string body = $"{msgMeta.EventDescription ?? "Unknown Event"} \n<{boxShort}>";
+                string title = $"SecurityBox Alert";
+                string url = "/dashboard";
+
+                pushTasks.Add(SendWebPushBatchAsync(subs, title, body, url));
             }
         }
 
@@ -92,6 +113,142 @@ public class TestSignals
 
         return signalRMessages.ToArray();
     }
+
+    private async Task SendWebPushBatchAsync(IEnumerable<PushSub> subs, string title, string body, string url)
+    {
+        if (subs is null) return;
+
+        var vapid = new VapidDetails(
+            _configuration["Vapid:Subject"],
+            _configuration["Vapid:PublicKey"],
+            _configuration["Vapid:PrivateKey"]);
+
+        var payload = JsonSerializer.Serialize(new { title, body, url });
+
+        // sequential is fine at your scale; throttle/parallelize later if needed
+        foreach (var s in subs)
+        {
+            try
+            {
+                var sub = new PushSubscription(s.Endpoint, s.P256dh, s.Auth);
+                await _push.SendNotificationAsync(sub, payload, vapid);
+                _logger.LogInformation("[WebPush-OK] {Endpoint}", s.Endpoint);
+            }
+            catch (WebPushException ex) when (ex.StatusCode == HttpStatusCode.Gone || ex.StatusCode == HttpStatusCode.NotFound)
+            {
+                _logger.LogWarning("[WebPush-STALE] {Endpoint} ({Status}) → deleting", s.Endpoint, ex.StatusCode);
+                await DeleteSubscriptionByEndpointAsync(s.Endpoint);
+            }
+            catch (WebPushException ex)
+            {
+                _logger.LogError(ex, "[WebPush-ERR] {Endpoint} ({Status})", s.Endpoint, ex.StatusCode);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "[WebPush-ERR] Unexpected for {Endpoint}", s.Endpoint);
+            }
+        }
+    }
+
+    public sealed class PushSub
+    {
+        public int Id { get; set; }
+        public int UserId { get; set; }
+        public string Endpoint { get; set; } = "";
+        public string P256dh { get; set; } = "";
+        public string Auth { get; set; } = "";
+        public DateTime? ExpirationTime { get; set; }
+    }
+
+    public sealed class MsgMeta
+    {
+        public string EventCode { get; set; } = "";
+        public string? EventDescription { get; set; }
+        public string? BoxDescription { get; set; }
+    }
+
+    private async Task<(List<int> UserIds, List<PushSub> Subs, MsgMeta Meta)> GetNotificationRecipientsAsync(
+        SqlConnection conn, long boxId, string eventCode)
+    {
+        const string sql = @"
+                CREATE TABLE #EligibleUsers (UserID int NOT NULL PRIMARY KEY);
+
+                INSERT INTO #EligibleUsers(UserID)
+                SELECT u.UserID
+                FROM dbo.Users u
+                LEFT JOIN dbo.UserEventSettings s
+                    ON s.UserID = u.UserID AND s.EventCode = @EventCode
+                WHERE u.BoxID = @BoxID
+                AND ISNULL(u.IsEnabled, 1) = 1
+                AND COALESCE(s.NotificationEnabled, 1) = 1;  -- default allow
+
+                -- 1) SignalR users
+                SELECT eu.UserID
+                FROM #EligibleUsers eu;
+
+                -- 2) Push subscriptions for those users
+                SELECT ps.Id, ps.UserId, ps.Endpoint, ps.P256dh, ps.Auth, ps.ExpirationTime
+                FROM #EligibleUsers eu
+                JOIN dbo.PushSubscriptions ps ON ps.UserId = eu.UserID
+                WHERE ps.ExpirationTime IS NULL OR ps.ExpirationTime > SYSUTCDATETIME();
+
+                -- 3) Message metadata: Event + Box descriptions
+                SELECT
+                @EventCode AS EventCode,
+                ec.EventDescription,
+                b.Description AS BoxDescription
+                FROM dbo.EventCodes ec
+                LEFT JOIN dbo.Boxes b ON b.BoxID = @BoxID
+                WHERE ec.EventCode = @EventCode;
+                ";
+        using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.Add("@BoxID", SqlDbType.BigInt).Value = boxId;
+        cmd.Parameters.Add("@EventCode", SqlDbType.NVarChar, 10).Value = eventCode;
+
+        var userIds = new List<int>();
+        var subs = new List<PushSub>();
+        var meta = new MsgMeta { EventCode = eventCode };
+
+        using var rdr = await cmd.ExecuteReaderAsync();
+
+        // Result set 1: user IDs for SignalR
+        while (await rdr.ReadAsync())
+            userIds.Add(rdr.GetInt32(0));
+
+        // Result set 2: push subscriptions
+        if (await rdr.NextResultAsync())
+        {
+            int oId = rdr.GetOrdinal("Id"),
+                oUserId = rdr.GetOrdinal("UserId"),
+                oEndpoint = rdr.GetOrdinal("Endpoint"),
+                oP256 = rdr.GetOrdinal("P256dh"),
+                oAuth = rdr.GetOrdinal("Auth"),
+                oExp = rdr.GetOrdinal("ExpirationTime");
+
+            while (await rdr.ReadAsync())
+            {
+                subs.Add(new PushSub
+                {
+                    Id = rdr.GetInt32(oId),
+                    UserId = rdr.GetInt32(oUserId),
+                    Endpoint = rdr.GetString(oEndpoint),
+                    P256dh = rdr.GetString(oP256),
+                    Auth = rdr.GetString(oAuth),
+                    ExpirationTime = rdr.IsDBNull(oExp) ? (DateTime?)null : rdr.GetDateTime(oExp)
+                });
+            }
+        }
+
+        // 3) meta
+        if (await rdr.NextResultAsync() && await rdr.ReadAsync())
+        {
+            meta.EventDescription = rdr.IsDBNull(1) ? null : rdr.GetString(1);
+            meta.BoxDescription = rdr.IsDBNull(2) ? null : rdr.GetString(2);
+        }
+
+        return (userIds, subs, meta);
+    }
+
 
     private async Task UpdateFingerprintNum(SqlConnection conn, SecurityBoxData data)
     {
