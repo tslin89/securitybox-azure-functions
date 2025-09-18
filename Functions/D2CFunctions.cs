@@ -66,20 +66,25 @@ public class TestSignals
 
             // save to database
             var sensorBoxData = JsonSerializer.Deserialize<SecurityBoxData>(msg);
-            if (sensorBoxData.EventCode == "D001" && sensorBoxData.FingerprintNum != 0 && sensorBoxData.UserID != 0)
+
+            bool inserted = await SaveToDatabase(conn, sensorBoxData);
+
+            if (inserted)
             {
-                // update fingerprint number for user
-                await UpdateFingerprintNum(conn, sensorBoxData);
+                if (sensorBoxData.EventCode == "D001" && sensorBoxData.FingerprintNum != 0 && sensorBoxData.UserID != 0)
+                {
+                    // update fingerprint number for user
+                    await UpdateFingerprintNum(conn, sensorBoxData);
 
-                _logger.LogInformation($"Fingerprint setup completed at IoT device. User: {sensorBoxData.UserID}, FingerprintNum: {sensorBoxData.FingerprintNum}");
+                    _logger.LogInformation($"Fingerprint setup completed at IoT device. User: {sensorBoxData.UserID}, FingerprintNum: {sensorBoxData.FingerprintNum}");
+                }
+
+                // 1) Trigger SignalR
+                signalRMessages.Add(new SignalRMessageAction("newAlert", new object[] { msg }));
+
+                // 2) Also send Web Push (your helper that loads subs & sends)
+                pushTasks.Add(SendWebPushAsyncForMessageAsync(msg));
             }
-
-            await SaveToDatabase(conn, sensorBoxData);
-
-            signalRMessages.Add(new SignalRMessageAction("newAlert", new object[] { msg }));
-
-            // 2) Also send Web Push (your helper that loads subs & sends)
-            pushTasks.Add(SendWebPushAsyncForMessageAsync(msg));
         }
 
         // ✅ wait for all pushes before finishing the function
@@ -99,25 +104,50 @@ public class TestSignals
         await cmd.ExecuteNonQueryAsync();
     }
 
-    private async Task SaveToDatabase(SqlConnection conn, SecurityBoxData data)
+    private async Task<bool> SaveToDatabase(SqlConnection conn, SecurityBoxData data)
     {
-        var cmd = new SqlCommand(
-            @"INSERT INTO dbo.SecurityBoxData (
-                TimeStamp, BoxID, EventCode, DoorState, FingerprintNum, TotalWeight, BoxPosition
-            ) 
-            VALUES (
-                @TimeStamp, @BoxID, @EventCode, @DoorState, @FingerprintNum, @TotalWeight, @BoxPosition
-            )", conn);
+        var sql = @"
+            SET NOCOUNT ON;
+            SET XACT_ABORT ON;
+            SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;
+            BEGIN TRAN;
+            IF NOT EXISTS (
+                SELECT 1 FROM dbo.SecurityBoxData
+                WHERE 
+                    1=1
+                    AND TimeStamp = @TimeStamp  
+                    AND BoxID = @BoxID 
+                    AND EventCode = @EventCode  
+                    AND ((DoorState = @DoorState) OR (DoorState IS NULL AND @DoorState IS NULL))
+                    AND ((FingerprintNum = @FingerprintNum) OR (FingerprintNum IS NULL AND @FingerprintNum IS NULL))
+                    AND ((TotalWeight = @TotalWeight) OR (TotalWeight IS NULL AND @TotalWeight IS NULL))
+                    AND ((BoxPosition = @BoxPosition) OR (BoxPosition IS NULL AND @BoxPosition IS NULL))
+            )
+            BEGIN
+                INSERT INTO dbo.SecurityBoxData (
+                    TimeStamp, BoxID, EventCode, DoorState, FingerprintNum, TotalWeight, BoxPosition, ReceivedTime
+                ) VALUES (
+                    @TimeStamp, @BoxID, @EventCode, @DoorState, @FingerprintNum, @TotalWeight, @BoxPosition, @ReceivedTime
+                );
+                SELECT CAST(1 AS bit);
+            END
+            ELSE
+                SELECT CAST(0 AS bit);
+            COMMIT;";
 
-        cmd.Parameters.Add("@TimeStamp", SqlDbType.DateTime).Value = DateTime.Now;
+        using var cmd = new SqlCommand(sql, conn);
+        cmd.Parameters.Add("@TimeStamp", SqlDbType.DateTime).Value = (object)data.TimeStamp;
         cmd.Parameters.Add("@BoxID", SqlDbType.BigInt).Value = data.BoxID;
         cmd.Parameters.Add("@EventCode", SqlDbType.NVarChar).Value = (object?)data.EventCode ?? "UNKNOWN";
         cmd.Parameters.Add("@DoorState", SqlDbType.BigInt).Value = (object?)data.DoorState ?? DBNull.Value;
         cmd.Parameters.Add("@FingerprintNum", SqlDbType.BigInt).Value = (object?)data.FingerprintNum ?? DBNull.Value;
         cmd.Parameters.Add("@TotalWeight", SqlDbType.Float).Value = (object?)data.TotalWeight ?? DBNull.Value;
         cmd.Parameters.Add("@BoxPosition", SqlDbType.BigInt).Value = (object?)data.BoxPosition ?? DBNull.Value;
+        cmd.Parameters.Add("@ReceivedTime", SqlDbType.DateTime).Value = DateTime.Now;
 
-        await cmd.ExecuteNonQueryAsync();
+        var inserted = (bool)await cmd.ExecuteScalarAsync();
+
+        return inserted;
     }
 
     private async Task<List<StoredPushSubscription>> GetAllSubscriptionsAsync()
@@ -160,14 +190,21 @@ public class TestSignals
         doc.RootElement.TryGetProperty("EventCode", out var eventCode);
         doc.RootElement.TryGetProperty("BoxID", out var boxID);
 
-        var title = "SecurityBox Alert";
-        var body = $"Box: {boxID.GetString()} - Event Code: {eventCode.GetString()}"; //rawJson           // keep as-is to avoid DateTime format issues
-        var url = "/dashboard";      // where you want taps to land in your PWA
+        try
+        {
+            var title = "SecurityBox Alert";
+            var body = $"Box: {Convert.ToString(boxID)} - Event Code: {Convert.ToString(eventCode)}"; //rawJson           // keep as-is to avoid DateTime format issues
+            var url = "/dashboard";      // where you want taps to land in your PWA
 
-        var subs = await GetAllSubscriptionsAsync(); // implement as shown earlier
-        if (subs.Count == 0) return;
+            var subs = await GetAllSubscriptionsAsync(); // implement as shown earlier
+            if (subs.Count == 0) return;
 
-        await SendWebPushAsync(subs, title, body, url);
+            await SendWebPushAsync(subs, title, body, url);
+        }
+        catch (Exception ex)
+        {
+            string msg = ex.Message;
+        }
     }
 
     public sealed class PushSubscriptionDtoTest

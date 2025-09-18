@@ -39,7 +39,7 @@ public class DashboardFunctions
         // Multi-select batch: NO hardcoded codes; we group by EventCode and let the client map labels.
         var sql = @"
             -- 1) Total boxes
-            SELECT COUNT(*) AS totalBoxes FROM DeviceMaster;
+            SELECT COUNT(*) AS totalBoxes FROM dbo.Boxes WHERE IsEnabled = 1;
 
             -- 2) Active boxes (seen in last @activeMinutes)
             WITH latest AS (

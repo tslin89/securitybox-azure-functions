@@ -29,6 +29,7 @@ namespace SecurityBoxFunctions.Model.Entities
         public string UserName { get; set; }
         public string Email { get; set; }
         public string PhoneNo { get; set; }
+        public long BoxID { get; set; }
     }
 
     public sealed class IotSignal

@@ -35,74 +35,7 @@ public class A2DFunctions
         _registry = RegistryManager.CreateFromConnectionString(_configuration["IoTHub2DeviceConnection"]);
     }
 
-    // OPTION 2: AAD (no secrets); uncomment this and remove the ctor above
-    // public SendFingerprintCommand(IConfiguration cfg)
-    // {
-    //     var hostName = cfg["IOTHUB_HOSTNAME"]; // e.g. myhub.azure-devices.net
-    //     _serviceClient = ServiceClient.Create(hostName, new DefaultAzureCredential());
-    // }
-
-    // [Function("SendFingerprintCommand")]
-    // public async Task<HttpResponseData> SendFingerprintSetupCommand(
-    //     [HttpTrigger(AuthorizationLevel.Function, "post", Route = "fingerprint/start")] HttpRequestData req)
-    // {
-    //     var body = await JsonSerializer.DeserializeAsync<StartReq>(req.Body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-    //     if (body is null || string.IsNullOrWhiteSpace(body.DeviceId))
-    //     {
-    //         var bad = req.CreateResponse(System.Net.HttpStatusCode.BadRequest);
-    //         await bad.WriteStringAsync("deviceId is required");
-    //         return bad;
-    //     }
-
-    //     // Prepare a direct method call
-    //     var method = new CloudToDeviceMethod("startFingerprintEnrollment")
-    //     {
-    //         ResponseTimeout = TimeSpan.FromSeconds(30),
-    //         ConnectionTimeout = TimeSpan.FromSeconds(10)
-    //     };
-    //     method.SetPayloadJson(JsonSerializer.Serialize(new
-    //     {
-    //         userId = body.UserId,
-    //         action = "start",
-    //         timeoutSec = 60,
-    //         correlationId = body.CorrelationId ?? Guid.NewGuid().ToString()
-    //     }));
-
-    //     try
-    //     {
-    //         // Check if device is accessible via registry
-    //         var device = await _registry.GetDeviceAsync(body.DeviceId);
-    //         _logger.LogInformation("Device found and enabled: {DeviceId}, Status: {Status}", device.Id, device.Status);
-
-    //         // Optional: Get twin to check last activity (rough online indicator)
-    //         var twin = await _registry.GetTwinAsync(body.DeviceId);
-    //         _logger.LogInformation("Device twin last activity: {LastActivity}", twin.LastActivityTime?.ToString() ?? "Unknown");
-
-    //         // Proceed with method invoke...
-    //         var result = await _serviceClient.InvokeDeviceMethodAsync(body.DeviceId, method);
-    //         var ok = req.CreateResponse(System.Net.HttpStatusCode.OK);
-    //         await ok.WriteAsJsonAsync(new
-    //         {
-    //             status = result.Status,                     // 200, 404 if method not found, 500 if device error, etc.
-    //             payload = result.GetPayloadAsJson()
-    //         });
-    //         return ok;
-    //     }
-    //     catch (DeviceNotFoundException)
-    //     {
-    //         var nf = req.CreateResponse(System.Net.HttpStatusCode.NotFound);
-    //         await nf.WriteStringAsync("Device not found or offline.");
-    //         return nf;
-    //     }
-    //     catch (Exception ex)
-    //     {
-    //         var err = req.CreateResponse(System.Net.HttpStatusCode.BadRequest);
-    //         await err.WriteStringAsync($"Invoke failed: {ex.Message}");
-    //         return err;
-    //     }
-    // }
-
-    [Function("SendFingerprintCommand")]
+    [Function("SetupFingerprint")]
     public async Task<HttpResponseData> SendFingerprintSetupCommand(
     [HttpTrigger(AuthorizationLevel.Function, "post", Route = "fingerprint/start")] HttpRequestData req)
     {

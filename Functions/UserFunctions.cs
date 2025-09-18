@@ -20,6 +20,8 @@ using Microsoft.Azure.SignalR.Management;
 using System.Text.Json.Serialization;
 using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
 using Microsoft.AspNetCore.Http.HttpResults;
+using System.Data;
+using Org.BouncyCastle.Asn1.Ocsp;
 
 
 namespace Winter.SecurityBox;
@@ -64,50 +66,69 @@ public partial class UserFunctions
             string emailFromDb;
             string passwordFromDb;
             Users user;
+            List<BoxDto> boxes = new();
+            List<EventCodeDto> eventCodes = new();
 
             await using (var conn = new SqlConnection(cs))
             {
                 await conn.OpenAsync();
 
-                // todo: inclue password hash in query
-                var cmd = new SqlCommand(
-                    @"SELECT UserID, UserName, Email, Password, PhoneNo
-                      FROM Users 
-                      WHERE Email = @Email", conn);
+                var sql = @"
+                -- 1) user
+                SELECT TOP (1) UserID, UserName, Email, Password, PhoneNo, BoxID
+                FROM Users WHERE Email = @Email;
 
+                -- 2) boxes
+                SELECT BoxID, DeviceID, Description
+                FROM dbo.Boxes WHERE IsEnabled = 1;
+
+                -- 3) event codes
+                SELECT EventCode, EventDescription, EventType
+                FROM dbo.EventCodes;";
+
+                await using var cmd = new SqlCommand(sql, conn);
                 cmd.Parameters.AddWithValue("@Email", login.Email);
 
-                await using var reader = await cmd.ExecuteReaderAsync();
-                if (!await reader.ReadAsync())
-                {
-                    return new UnauthorizedObjectResult(new ResponseObject
-                    {
-                        Status = -1,
-                        Message = "User not found for " + login.Email
-                    });
-                }
+                await using var r = await cmd.ExecuteReaderAsync();
 
-                string passwordFromDB = reader.GetString(reader.GetOrdinal("Password"));
+                // user
+                if (!await r.ReadAsync())
+                    return new UnauthorizedObjectResult(new ResponseObject { Status = -1, Message = $"User not found for {login.Email}" });
 
+                var passwordFromDB = r.GetString(r.GetOrdinal("Password"));
                 if (login.Password != passwordFromDB)
-                {
-                    return new UnauthorizedObjectResult(new ResponseObject
-                    {
-                        Status = -1,
-                        Message = "Your password is incorrect."
-                    });
-                }
+                    return new UnauthorizedObjectResult(new ResponseObject { Status = -1, Message = "Your password is incorrect." });
 
                 user = new Users
                 {
-                    UserID = reader.GetInt32(reader.GetOrdinal("UserID")),
-                    UserName = reader.GetString(reader.GetOrdinal("UserName")),
-                    Email = reader.GetString(reader.GetOrdinal("Email")),
-                    PhoneNo = reader.GetString(reader.GetOrdinal("PhoneNo"))
+                    UserID = r.GetInt32(r.GetOrdinal("UserID")),
+                    UserName = r.GetString(r.GetOrdinal("UserName")),
+                    Email = r.GetString(r.GetOrdinal("Email")),
+                    PhoneNo = r.IsDBNull(r.GetOrdinal("PhoneNo")) ? "" : r.GetString(r.GetOrdinal("PhoneNo")),
+                    BoxID = ReadInt64(r, "BoxID")
                 };
 
-                // I will not use server side hashing for this project as the focus is not on web app security. encrypted value will be directly compared.
-                // passwordHash = BCrypt.Net.BCrypt.HashPassword($"{userId}{emailFromDb}");
+                // boxes
+                await r.NextResultAsync();
+                while (await r.ReadAsync())
+                {
+                    boxes.Add(new BoxDto(
+                        BoxID: r.GetInt64(r.GetOrdinal("BoxID")),
+                        DeviceID: r.IsDBNull(r.GetOrdinal("DeviceID")) ? "" : r.GetString(r.GetOrdinal("DeviceID")),
+                        Description: r.IsDBNull(r.GetOrdinal("Description")) ? "" : r.GetString(r.GetOrdinal("Description"))
+                    ));
+                }
+
+                // event codes
+                await r.NextResultAsync();
+                while (await r.ReadAsync())
+                {
+                    eventCodes.Add(new EventCodeDto(
+                        EventCode: r.GetString(r.GetOrdinal("EventCode")),
+                        EventDescription: r.IsDBNull(r.GetOrdinal("EventDescription")) ? "" : r.GetString(r.GetOrdinal("EventDescription")),
+                        EventType: ReadInt32(r, "EventType")
+                    ));
+                }
             }
 
             //bool ok = BCrypt.Net.BCrypt.Verify(login.Password, passwordHash);
@@ -132,7 +153,9 @@ public partial class UserFunctions
             responseObj.Data = new
             {
                 Token = token,
-                User = user
+                User = user,
+                BoxList = boxes,       // your (1)
+                EventCodes = eventCodes // your (2)
             };
 
             return new OkObjectResult(responseObj);
@@ -143,6 +166,9 @@ public partial class UserFunctions
             return new StatusCodeResult(StatusCodes.Status500InternalServerError);
         }
     }
+
+    public record BoxDto(long BoxID, string DeviceID, string Description);
+    public record EventCodeDto(string EventCode, string EventDescription, int EventType);
 
     [Function("negotiateSignalR")]
     public async Task<HttpResponseData> Run(
@@ -172,7 +198,8 @@ public partial class UserFunctions
         public int UserType { get; set; }
         public long? FingerprintNum { get; set; }
         public bool? FingerprintEnabled { get; set; }
-        public bool? UserEnabled { get; set; }
+        public long? BoxID { get; set; }
+        public bool IsEnabled { get; set; }
     }
 
     public class CreateUserDto
@@ -183,7 +210,8 @@ public partial class UserFunctions
         public string Password { get; set; } = string.Empty;
         public int UserType { get; set; }
         public bool? FingerprintEnabled { get; set; }
-        public bool? UserEnabled { get; set; }
+        public long BoxID { get; set; }
+        public bool IsEnabled { get; set; }
     }
 
     public class UpdateUserDto
@@ -195,7 +223,8 @@ public partial class UserFunctions
         public string? Password { get; set; } // Optional for updates
         public int UserType { get; set; }
         public bool? FingerprintEnabled { get; set; }
-        public bool? UserEnabled { get; set; }
+        public long BoxID { get; set; }
+        public bool IsEnabled { get; set; }
     }
 
     // Azure Functions
@@ -210,7 +239,7 @@ public partial class UserFunctions
 
             var cmd = new SqlCommand(@"
             SELECT UserID, UserName, Email, PhoneNo, UserType, 
-                   FingerprintNum, FingerprintEnabled, UserEnabled 
+                   FingerprintNum, FingerprintEnabled, BoxID, IsEnabled
             FROM dbo.Users 
             ORDER BY UserName", conn);
 
@@ -228,7 +257,8 @@ public partial class UserFunctions
                     UserType = ReadInt32(reader, "UserType"),
                     FingerprintNum = ReadInt64(reader, "FingerprintNum"),
                     FingerprintEnabled = ReadBit(reader, "FingerprintEnabled"),
-                    UserEnabled = ReadBit(reader, "UserEnabled")
+                    BoxID = ReadInt64(reader, "BoxID"),
+                    IsEnabled = ReadBit(reader, "IsEnabled"),
                 });
             }
 
@@ -273,7 +303,7 @@ public partial class UserFunctions
 
             var cmd = new SqlCommand(@"
             SELECT UserID, UserName, Email, PhoneNo, UserType, 
-                   FingerprintNum, FingerprintEnabled, UserEnabled 
+                   FingerprintNum, FingerprintEnabled, BoxID, IsEnabled
             FROM dbo.Users 
             WHERE UserID = @UserID", conn);
 
@@ -292,7 +322,8 @@ public partial class UserFunctions
                     UserType = ReadInt32(reader, "UserType"),
                     FingerprintNum = ReadInt64(reader, "FingerprintNum"),
                     FingerprintEnabled = ReadBit(reader, "FingerprintEnabled"),
-                    UserEnabled = ReadBit(reader, "UserEnabled")
+                    BoxID = ReadInt64(reader, "BoxID"),
+                    IsEnabled = ReadBit(reader, "IsEnabled"),
                 };
 
                 return new OkObjectResult(user);
@@ -335,9 +366,9 @@ public partial class UserFunctions
             }
 
             var cmd = new SqlCommand(@"
-            INSERT INTO dbo.Users (UserName, Email, PhoneNo, Password, UserType, FingerprintEnabled, UserEnabled)
+            INSERT INTO dbo.Users (UserName, Email, PhoneNo, Password, UserType, FingerprintEnabled, IsEnabled, BoxID)
             OUTPUT INSERTED.UserID
-            VALUES (@UserName, @Email, @PhoneNo, @Password, @UserType, @FingerprintEnabled, @UserEnabled)", conn);
+            VALUES (@UserName, @Email, @PhoneNo, @Password, @UserType, @FingerprintEnabled, @IsEnabled, @BoxID)", conn);
 
             cmd.Parameters.AddWithValue("@UserName", dto.UserName);
             cmd.Parameters.AddWithValue("@Email", dto.Email);
@@ -345,7 +376,8 @@ public partial class UserFunctions
             cmd.Parameters.AddWithValue("@Password", dto.Password); // Assume password is already hashed from client
             cmd.Parameters.AddWithValue("@UserType", dto.UserType);
             cmd.Parameters.AddWithValue("@FingerprintEnabled", (object?)dto.FingerprintEnabled ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@UserEnabled", (object?)dto.UserEnabled ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@IsEnabled", (object?)dto.IsEnabled ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@BoxID", (object?)dto.BoxID ?? DBNull.Value);
 
             var newUserId = (int)await cmd.ExecuteScalarAsync();
 
@@ -376,7 +408,7 @@ public partial class UserFunctions
             await conn.OpenAsync();
 
             // Check if email already exists for other users
-            var checkCmd = new SqlCommand("SELECT COUNT(*) FROM dbo.Users WHERE Email = @Email AND UserID != @UserID", conn);
+            var checkCmd = new SqlCommand("SELECT COUNT(1) FROM dbo.Users WHERE Email = @Email AND UserID != @UserID", conn);
             checkCmd.Parameters.AddWithValue("@Email", dto.Email);
             checkCmd.Parameters.AddWithValue("@UserID", id);
             var exists = (int)await checkCmd.ExecuteScalarAsync() > 0;
@@ -394,7 +426,7 @@ public partial class UserFunctions
             "PhoneNo = @PhoneNo",
             "UserType = @UserType",
             "FingerprintEnabled = @FingerprintEnabled",
-            "UserEnabled = @UserEnabled"
+            "IsEnabled = @IsEnabled"
         };
 
             if (!string.IsNullOrWhiteSpace(dto.Password))
@@ -415,12 +447,44 @@ public partial class UserFunctions
             cmd.Parameters.AddWithValue("@PhoneNo", (object?)dto.PhoneNo ?? DBNull.Value);
             cmd.Parameters.AddWithValue("@UserType", dto.UserType);
             cmd.Parameters.AddWithValue("@FingerprintEnabled", (object?)dto.FingerprintEnabled ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@UserEnabled", (object?)dto.UserEnabled ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("@IsEnabled", (object?)dto.IsEnabled ?? DBNull.Value);
 
             if (!string.IsNullOrWhiteSpace(dto.Password))
             {
                 cmd.Parameters.AddWithValue("@Password", dto.Password); // Assume password is already hashed from client
             }
+
+            var rowsAffected = await cmd.ExecuteNonQueryAsync();
+
+            if (rowsAffected == 0)
+            {
+                return new NotFoundObjectResult("User not found");
+            }
+
+            return new OkObjectResult(new { Message = "User updated successfully" });
+        }
+        catch (Exception ex)
+        {
+            return new BadRequestObjectResult($"Error: {ex.Message}");
+        }
+    }
+
+    [Function("DeleteUser")]
+    public async Task<IActionResult> DeleteUser(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "delete", Route = "users/{id:int}")] HttpRequest req,
+        int id)
+    {
+        try
+        {
+            using var conn = new SqlConnection(_configuration["SqlConnectionString"]);
+            await conn.OpenAsync();
+
+            var sql = $@"
+            DELETE FROM dbo.Users 
+            WHERE UserID = @UserID";
+
+            var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@UserID", id);
 
             var rowsAffected = await cmd.ExecuteNonQueryAsync();
 
@@ -460,6 +524,88 @@ public partial class UserFunctions
             return new BadRequestObjectResult($"Error: {ex.Message}");
         }
     }
-    
-     
+
+    [Function("GetUserEventSettings")]
+    public async Task<IActionResult> GetUserEventSettings(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "users/{id:int}/eventsettings")] HttpRequest req,
+        int id)
+    {
+        try
+        {
+            using var conn = new SqlConnection(_configuration["SqlConnectionString"]);
+            await conn.OpenAsync();
+
+            var cmd = new SqlCommand(@"
+                SELECT c.EventCode, c.EventDescription, c.EventType, COALESCE(u.NotificationEnabled, 1) AS NotificationEnabled
+                FROM EventCodes as c
+                LEFT JOIN UserEventSettings as u ON u.EventCode = c.EventCode AND u.UserID = @UserID
+                WHERE c.IsC2D = 0", conn);
+            cmd.Parameters.AddWithValue("@UserID", id);
+
+            using var reader = await cmd.ExecuteReaderAsync();
+
+            List<UserEventSettings> result = new List<UserEventSettings>();
+            while (await reader.ReadAsync())
+            {
+                result.Add(new UserEventSettings
+                {
+                    EventCode = ReadString(reader, "EventCode"),
+                    EventDescription = ReadString(reader, "EventDescription"),
+                    EventType = ReadInt32(reader, "EventType"),
+                    NotificationEnabled = ReadBit(reader, "NotificationEnabled")
+                });
+            }
+
+            ResponseObject responseObj = new ResponseObject();
+            responseObj.Data = result;
+            return new OkObjectResult(responseObj);
+        }
+        catch (Exception ex)
+        {
+            return new BadRequestObjectResult(new ResponseObject
+            {
+                Status = (int)CommonEnum.ResponseStatus.Failed,
+                Message = ex.Message
+            });
+        }
+    }
+
+    [Function("UpdateUserEventSettings")]
+    public async Task<IActionResult> UpdateUserEventSettings(
+        [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "users/{id:int}/eventsettings")] HttpRequest req,
+        int id)
+    {
+        try
+        {
+            var bodyText = await new StreamReader(req.Body).ReadToEndAsync();
+
+            using var conn = new SqlConnection(_configuration["SqlConnectionString"]);
+            await conn.OpenAsync();
+
+            var cmd = new SqlCommand(@"
+                DELETE FROM dbo.UserEventSettings WHERE UserID = @UserID;
+
+                INSERT INTO dbo.UserEventSettings (UserID, EventCode, NotificationEnabled)
+                SELECT @UserID, value, 0
+                FROM OPENJSON(@Payload, '$.disabledCodes');", conn);
+
+            cmd.Parameters.AddWithValue("@UserID", id);
+            cmd.Parameters.Add("@Payload", SqlDbType.NVarChar, -1).Value = bodyText;
+
+            await cmd.ExecuteNonQueryAsync();
+
+            ResponseObject responseObj = new ResponseObject();
+            responseObj.Data = "OK";
+            return new OkObjectResult(responseObj);
+        }
+        catch (Exception ex)
+        {
+            return new BadRequestObjectResult(new ResponseObject
+            {
+                Status = (int)CommonEnum.ResponseStatus.Failed,
+                Message = ex.Message
+            });
+        }
+    }
+
 }
