@@ -72,7 +72,7 @@ public class TestSignals
 
             if (inserted)
             {
-                if (sensorBoxData.EventCode == "D001" && sensorBoxData.FingerprintNum != 0 && sensorBoxData.UserID != 0)
+                if (sensorBoxData.EventCode == "C201" && sensorBoxData.FingerprintNum != 0 && sensorBoxData.UserID != 0)
                 {
                     // update fingerprint number for user
                     await UpdateFingerprintNum(conn, sensorBoxData);

@@ -35,9 +35,9 @@ public class A2DFunctions
         _registry = RegistryManager.CreateFromConnectionString(_configuration["IoTHub2DeviceConnection"]);
     }
 
-    [Function("SetupFingerprint")]
-    public async Task<HttpResponseData> SendFingerprintSetupCommand(
-    [HttpTrigger(AuthorizationLevel.Function, "post", Route = "fingerprint/start")] HttpRequestData req)
+    [Function("SendSignalToDevice")]
+    public async Task<HttpResponseData> SendSignalToDevice(
+    [HttpTrigger(AuthorizationLevel.Function, "post", Route = "device/sendsignal")] HttpRequestData req)
     {
         var body = await JsonSerializer.DeserializeAsync<StartReq>(req.Body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
         if (body is null || string.IsNullOrWhiteSpace(body.DeviceId))
@@ -48,15 +48,33 @@ public class A2DFunctions
         }
 
         // Prepare C2D message
-        var message = new Message(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
+        // var message = new Message(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new
+        // {
+        //     eventCode = body.eventCode,
+        //     fingerprintNum = body.fingerprintNum,
+        //     userId = body.UserId,
+
+        //     // temporary added until device changes ready
+        //     action = "setup-fingerprint"
+        // })))
+        // {
+        //     MessageId = Guid.NewGuid().ToString(),
+        //     ExpiryTimeUtc = DateTime.UtcNow.AddHours(24)
+        // };
+
+        var message = new Message(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new C2DObject
         {
-            userId = body.UserId,
-            action = "setup-fingerprint",
-            transactionID = body.CorrelationId ?? Guid.NewGuid().ToString()
+            EventCode = body.eventCode,
+            UserID = body.UserId,
+            FingerprintNum = body.fingerprintNum,
+            
+
+            // temporary added until device changes ready
+            action = "setup-fingerprint"
         })))
         {
             MessageId = Guid.NewGuid().ToString(),
-            ExpiryTimeUtc = DateTime.UtcNow.AddHours(24) // Optional: Set TTL
+            ExpiryTimeUtc = DateTime.UtcNow.AddHours(24)
         };
 
         try
@@ -88,25 +106,21 @@ public class A2DFunctions
         }
     }
 
-    private record StartReq(string DeviceId, int UserId, string? CorrelationId);
+    private record StartReq(
+        string DeviceId,
+        int UserId,
+        long? fingerprintNum,
+        string eventCode
+    );
 
-    // [Function("CheckFingerprintStatus")]
-    // public async Task<HttpResponseData> Run(
-    //     [HttpTrigger(AuthorizationLevel.Function, "get", Route = "fingerprint/status/{deviceId}")] HttpRequestData req,
-    //     string deviceId)
-    // {
-    //     var twin = await _registry.GetTwinAsync(deviceId);
+    private class C2DObject
+    {
+        public string EventCode { get; set; }
+        public int UserID { get; set; }
+        public long? FingerprintNum { get; set; }
 
-    //     // Expecting this shape from device code above:
-    //     // reported.fingerprint.lastEnrollment = { userId, status, num, updatedAt, correlationId }
-    //     var reported = twin.Properties.Reported;
+        // temporary; remove after device code changed
+        public string? action { get; set; }
+    }
 
-    //     var fp = reported["fingerprint"]?["lastEnrollment"];
-    //     var status = fp?["status"]?.ToString();
-    //     var num = (int?)fp?["num"];
-
-    //     var ok = req.CreateResponse(System.Net.HttpStatusCode.OK);
-    //     await ok.WriteAsJsonAsync(new { status = status ?? "waiting", fingerprintNum = num });
-    //     return ok;
-    // }
 }
