@@ -66,11 +66,7 @@ public class A2DFunctions
         {
             EventCode = body.eventCode,
             UserID = body.UserId,
-            FingerprintNum = body.fingerprintNum,
-            
-
-            // temporary added until device changes ready
-            action = "setup-fingerprint"
+            FingerprintNum = body.fingerprintNum
         })))
         {
             MessageId = Guid.NewGuid().ToString(),
@@ -118,9 +114,5 @@ public class A2DFunctions
         public string EventCode { get; set; }
         public int UserID { get; set; }
         public long? FingerprintNum { get; set; }
-
-        // temporary; remove after device code changed
-        public string? action { get; set; }
     }
-
 }
