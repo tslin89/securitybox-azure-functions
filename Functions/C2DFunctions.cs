@@ -15,6 +15,7 @@ using System.Data.SqlClient;
 using SecurityBoxFunctions.Model.Entities;
 using WebPush;
 using Microsoft.Azure.Devices.Common.Exceptions;
+using SecurityBoxFunctions.Library;
 
 namespace Winter.SecurityBox;
 
@@ -36,15 +37,17 @@ public class A2DFunctions
     }
 
     [Function("SendSignalToDevice")]
-    public async Task<HttpResponseData> SendSignalToDevice(
+    public async Task<IActionResult> SendSignalToDevice(
     [HttpTrigger(AuthorizationLevel.Function, "post", Route = "device/sendsignal")] HttpRequestData req)
     {
         var body = await JsonSerializer.DeserializeAsync<StartReq>(req.Body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
         if (body is null || string.IsNullOrWhiteSpace(body.DeviceId))
         {
-            var bad = req.CreateResponse(System.Net.HttpStatusCode.BadRequest);
-            await bad.WriteStringAsync("deviceId is required");
-            return bad;
+            return new OkObjectResult(new ResponseObject
+                {
+                    Status = (int)CommonEnum.ResponseStatus.Failed,
+                    Message = $"Device ID required."
+                });
         }
 
         // Prepare C2D message
@@ -80,25 +83,32 @@ public class A2DFunctions
             if (device == null || device.Status != DeviceStatus.Enabled)
             {
                 _logger.LogWarning("Device {DeviceId} not found or disabled", body.DeviceId);
-                var nf = req.CreateResponse(System.Net.HttpStatusCode.NotFound);
-                await nf.WriteStringAsync("Device not found or disabled.");
-                return nf;
+
+                return new OkObjectResult(new ResponseObject
+                {
+                    Status = (int)CommonEnum.ResponseStatus.Failed,
+                    Message = $"Device not found or disabled."
+                });
             }
 
-            // Send C2D message
             await _serviceClient.SendAsync(body.DeviceId, message);
             _logger.LogInformation("C2D message sent to DeviceId: {DeviceId}, MessageId: {MessageId}", body.DeviceId, message.MessageId);
 
-            var ok = req.CreateResponse(System.Net.HttpStatusCode.OK);
-            await ok.WriteAsJsonAsync(new { status = "sent", messageId = message.MessageId });
-            return ok;
+            return new OkObjectResult(new ResponseObject
+            {
+                Status = (int)CommonEnum.ResponseStatus.Success,
+                Message = $"Message successfully sent to device."
+            });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to send C2D message to DeviceId: {DeviceId}, Error: {Message}", body.DeviceId, ex.Message);
-            var err = req.CreateResponse(System.Net.HttpStatusCode.BadRequest);
-            await err.WriteStringAsync($"Send failed: {ex.Message}");
-            return err;
+            
+            return new BadRequestObjectResult(new ResponseObject
+            {
+                Status = (int)CommonEnum.ResponseStatus.Failed,
+                Message = $"Failed to send C2D message to DeviceId: {body.DeviceId}, Error: {ex.Message}"
+            });
         }
     }
 

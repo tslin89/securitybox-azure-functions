@@ -15,6 +15,14 @@ namespace SecurityBoxFunctions.Model.Entities
         public long? BoxPosition { get; set; }
         public long? UserID { get; set; }
         public string? TransactionID { get; set; }
+        public DateTime? ReceivedTime { get; set; }
+    }
+
+    public class BoxEventDataDto : SecurityBoxData
+    {
+        public string DeviceID { get; set; }
+        public string Description { get; set; }
+        public DateTime? TimeStamp { get; set; }
     }
 
     public sealed class LoginRequest

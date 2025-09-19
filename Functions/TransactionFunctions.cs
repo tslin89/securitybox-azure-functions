@@ -136,58 +136,81 @@ public class TransactionFunctions
         }
     }
 
-    /*
-                [Function("GetTransactions")]
-                public async Task<IActionResult> Run(
-                    [HttpTrigger(AuthorizationLevel.Function, "get")] HttpRequest req)
+    [Function("GetLastEventData")]
+    public async Task<IActionResult> GetLastEventData(
+    [HttpTrigger(AuthorizationLevel.Function, "get", Route = "transactions/lastevent")] HttpRequest req)
+    {
+        try
+        {
+            // Parse pagination parameters from query string
+            string boxId = req.Query["boxID"].FirstOrDefault() ?? "0";
+            string userId = req.Query["userID"].FirstOrDefault() ?? ""; // use later if necessary
+
+
+            List<BoxEventDataDto> result = new List<BoxEventDataDto>();
+            using (SqlConnection conn = new SqlConnection(_configuration["SqlConnectionString"]))
+            {
+                await conn.OpenAsync();
+
+                // Then get the paginated data
+                var query = $@"
+                SELECT
+                    b.BoxID,
+                    b.DeviceID,
+                    b.Description,
+                    s.TimeStamp,
+                    s.EventCode,
+                    s.DoorState,
+                    s.FingerprintNum,
+                    s.TotalWeight,
+                    s.BoxPosition,
+                    s.ReceivedTime
+                    FROM dbo.Boxes AS b
+                    OUTER APPLY (
+                        SELECT TOP 1 s.*
+                        FROM dbo.SecurityBoxData AS s
+                        WHERE s.BoxID = b.BoxID
+                        ORDER BY s.ReceivedTime DESC, s.Id DESC
+                        ) AS s
+                WHERE (@BoxID IS NULL OR b.BoxID = @BoxID)
+                AND b.IsEnabled = 1
+                ORDER BY b.BoxID;";
+
+                using (SqlCommand cmd = new SqlCommand(query, conn))
                 {
-                    string msg = "GetTransactions";
-                    try
+                    cmd.Parameters.AddWithValue("@BoxID", boxId == "0"? DBNull.Value: boxId);
+
+                    using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
                     {
-                        var transactions = new List<SecurityBoxData>();
-                        _logger.LogInformation("Fetching transactions from Azure SQL Database...");
-
-                        string connectionString = _configuration["SqlConnectionString"];
-
-                        var query = "SELECT * FROM SecurityBoxData";
-
-                        using (SqlConnection conn = new SqlConnection(connectionString))
+                        while (await reader.ReadAsync())
                         {
-                            await conn.OpenAsync();
-                            using (SqlCommand cmd = new SqlCommand(query, conn))
+                            result.Add(new BoxEventDataDto
                             {
-                                using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
-                                {
-                                    while (await reader.ReadAsync())
-                                    {
-                                        transactions.Add(new SecurityBoxData
-                                        {
-                                            Id = reader.GetInt32(reader.GetOrdinal("Id")),
-                                            TimeStamp = reader.GetDateTime(reader.GetOrdinal("TimeStamp")),
-                                            BoxID = reader.GetInt64(reader.GetOrdinal("BoxID")),
-                                            EventCode = reader.GetString(reader.GetOrdinal("EventCode")),
-                                            DoorState = reader.IsDBNull(reader.GetOrdinal("DoorState")) ? null : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("DoorState"))),
-                                            FingerprintNum = reader.IsDBNull(reader.GetOrdinal("FingerprintNum")) ? null : Convert.ToInt32(reader.GetValue(reader.GetOrdinal("FingerprintNum"))),
-                                            TotalWeight = reader.IsDBNull(reader.GetOrdinal("TotalWeight")) ? null : Convert.ToSingle(reader.GetValue(reader.GetOrdinal("TotalWeight"))),
-                                            BoxPosition = reader.IsDBNull(reader.GetOrdinal("BoxPosition")) ? null : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("BoxPosition")))
-                                        });
-                                    }
-                                }
-                            }
+                                TimeStamp = reader.IsDBNull(reader.GetOrdinal("TimeStamp")) ? null : reader.GetDateTime(reader.GetOrdinal("TimeStamp")),
+                                BoxID = reader.GetInt64(reader.GetOrdinal("BoxID")),
+                                EventCode = reader.IsDBNull(reader.GetOrdinal("EventCode"))? null:  reader.GetString(reader.GetOrdinal("EventCode")),
+                                DoorState = reader.IsDBNull(reader.GetOrdinal("DoorState")) ? null : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("DoorState"))),
+                                FingerprintNum = reader.IsDBNull(reader.GetOrdinal("FingerprintNum")) ? null : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("FingerprintNum"))),
+                                TotalWeight = reader.IsDBNull(reader.GetOrdinal("TotalWeight")) ? null : Convert.ToSingle(reader.GetValue(reader.GetOrdinal("TotalWeight"))),
+                                BoxPosition = reader.IsDBNull(reader.GetOrdinal("BoxPosition")) ? null : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("BoxPosition"))),
+                                ReceivedTime = reader.IsDBNull(reader.GetOrdinal("ReceivedTime")) ? null : reader.GetDateTime(reader.GetOrdinal("ReceivedTime")),
+                                DeviceID = reader.GetString(reader.GetOrdinal("DeviceID")),
+                                Description = reader.GetString(reader.GetOrdinal("Description")),
+                            });
                         }
-
-                        ResponseObject responseObj = new ResponseObject();
-                        responseObj.Data = transactions;
-
-                        return new OkObjectResult(responseObj);
                     }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "Error fetching transactions");
-                        return new BadRequestObjectResult($"{msg} - Error: {ex.Message}");
-                        //return new StatusCodeResult(StatusCodes.Status500InternalServerError);
-                    }
-
                 }
-                */
+            }
+
+            ResponseObject responseObj = new ResponseObject();
+            responseObj.Data = result;
+
+            return new OkObjectResult(responseObj);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching transactions");
+            return new BadRequestObjectResult($"Error: {ex.Message}");
+        }
+    }
 }
