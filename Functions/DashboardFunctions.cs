@@ -39,17 +39,10 @@ public class DashboardFunctions
         // Multi-select batch: NO hardcoded codes; we group by EventCode and let the client map labels.
         var sql = @"
             -- 1) Total boxes
-            SELECT COUNT(*) AS totalBoxes FROM dbo.Boxes WHERE IsEnabled = 1;
+            SELECT COUNT(*) AS totalBoxes FROM dbo.Boxes;
 
             -- 2) Active boxes (seen in last @activeMinutes)
-            WITH latest AS (
-            SELECT BoxID, MAX([Timestamp]) AS lastSeen
-            FROM SecurityBoxData
-            GROUP BY BoxID
-            )
-            SELECT COUNT(*) AS activeBoxes
-            FROM latest
-            WHERE lastSeen >= DATEADD(minute, -@activeMinutes, SYSUTCDATETIME());
+            SELECT COUNT(*) AS activeBoxes FROM dbo.Boxes WHERE IsEnabled = 1;
 
             -- 3) Open doors now (latest state per box)
             WITH lastState AS (

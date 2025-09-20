@@ -76,7 +76,7 @@ public partial class UserFunctions
 
                 var sql = @"
                 -- 1) user
-                SELECT TOP (1) UserID, UserName, Email, Password, PhoneNo, BoxID, FingerprintEnabled, UserType
+                SELECT TOP (1) UserID, UserName, Email, Password, PhoneNo, FingerprintEnabled, UserType
                 FROM Users WHERE Email = @Email AND IsEnabled = 1;
 
                 -- 2) boxes
@@ -114,7 +114,6 @@ public partial class UserFunctions
                     UserName = ConvertDBValue.ReadString(r, "UserName"),
                     Email = ConvertDBValue.ReadString(r, "Email"),
                     PhoneNo = ConvertDBValue.ReadString(r, "PhoneNo"),
-                    BoxID = ConvertDBValue.ReadInt64(r, "BoxID"),
                     FingerprintEnabled = ConvertDBValue.ReadBit(r, "FingerprintEnabled"),
                     UserType = ConvertDBValue.ReadInt32(r, "UserType")
                 };
@@ -228,9 +227,7 @@ public partial class UserFunctions
         public string? PhoneNo { get; set; }
         public string? Password { get; set; } // Only for create/update
         public int UserType { get; set; }
-        public long? FingerprintNum { get; set; }
         public bool? FingerprintEnabled { get; set; }
-        public long? BoxID { get; set; }
         public bool IsEnabled { get; set; }
     }
 
@@ -255,7 +252,6 @@ public partial class UserFunctions
         public string? Password { get; set; } // Optional for updates
         public int UserType { get; set; }
         public bool? FingerprintEnabled { get; set; }
-        public long BoxID { get; set; }
         public bool IsEnabled { get; set; }
     }
 
@@ -271,7 +267,7 @@ public partial class UserFunctions
 
             var cmd = new SqlCommand(@"
             SELECT UserID, UserName, Email, PhoneNo, UserType, 
-                   FingerprintNum, FingerprintEnabled, BoxID, IsEnabled
+                   FingerprintEnabled, IsEnabled
             FROM dbo.Users 
             ORDER BY UserName", conn);
 
@@ -287,9 +283,7 @@ public partial class UserFunctions
                     Email = ConvertDBValue.ReadString(reader, "Email"),
                     PhoneNo = ConvertDBValue.ReadString(reader, "PhoneNo"),
                     UserType = ConvertDBValue.ReadInt32(reader, "UserType"),
-                    FingerprintNum = ConvertDBValue.ReadInt64(reader, "FingerprintNum"),
                     FingerprintEnabled = ConvertDBValue.ReadBit(reader, "FingerprintEnabled"),
-                    BoxID = ConvertDBValue.ReadInt64(reader, "BoxID"),
                     IsEnabled = ConvertDBValue.ReadBit(reader, "IsEnabled"),
                 });
             }
@@ -315,7 +309,7 @@ public partial class UserFunctions
 
             var cmd = new SqlCommand(@"
             SELECT UserID, UserName, Email, PhoneNo, UserType, 
-                   FingerprintNum, FingerprintEnabled, BoxID, IsEnabled
+                   FingerprintEnabled, IsEnabled
             FROM dbo.Users 
             WHERE UserID = @UserID", conn);
 
@@ -332,9 +326,7 @@ public partial class UserFunctions
                     Email = ConvertDBValue.ReadString(reader, "Email"),
                     PhoneNo = ConvertDBValue.ReadString(reader, "PhoneNo"),
                     UserType = ConvertDBValue.ReadInt32(reader, "UserType"),
-                    FingerprintNum = ConvertDBValue.ReadInt64(reader, "FingerprintNum"),
                     FingerprintEnabled = ConvertDBValue.ReadBit(reader, "FingerprintEnabled"),
-                    BoxID = ConvertDBValue.ReadInt64(reader, "BoxID"),
                     IsEnabled = ConvertDBValue.ReadBit(reader, "IsEnabled"),
                 };
 
@@ -695,7 +687,8 @@ public partial class UserFunctions
                     ORDER BY COALESCE(s.ReceivedTime, s.TimeStamp) DESC, s.Id DESC
                     ) AS s
                 WHERE (@BoxID IS NULL OR b.BoxID = @BoxID)
-                ORDER BY b.IsEnabled, b.BoxID;";
+                    AND b.IsEnabled = 1
+                ORDER BY b.IsEnabled DESC, b.BoxID ASC;";
 
                 using (SqlCommand cmd = new SqlCommand(query, conn))
                 {

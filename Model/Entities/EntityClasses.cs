@@ -18,6 +18,13 @@ namespace SecurityBoxFunctions.Model.Entities
         public DateTime? ReceivedTime { get; set; }
     }
 
+    public class SecurityBoxHistoryData : SecurityBoxData
+    {
+        public string EventDescription { get; set; }
+        public int EventType { get; set; }
+        public int IsC2D { get; set; }
+    }
+
     public class UserBoxData : SecurityBoxData
     {
         public string DeviceID { get; set; }
@@ -39,7 +46,6 @@ namespace SecurityBoxFunctions.Model.Entities
         public string UserName { get; set; }
         public string Email { get; set; }
         public string PhoneNo { get; set; }
-        public long BoxID { get; set; }
         public bool FingerprintEnabled { get; set; }
         public int UserType { get; set; }
     }

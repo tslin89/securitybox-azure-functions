@@ -6,6 +6,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Data.SqlClient;
 using SecurityBoxFunctions.Model.Entities;
+using SecurityBoxFunctions.Library;
 
 namespace Winter.SecurityBox;
 
@@ -57,7 +58,7 @@ public class TransactionFunctions
                 sortDirection = "desc";
             }
 
-            var transactions = new List<SecurityBoxData>();
+            var transactions = new List<SecurityBoxHistoryData>();
             int totalCount = 0;
 
             _logger.LogInformation($"Fetching transactions - Page: {page}, PageSize: {pageSize}, Sort: {sortField} {sortDirection}");
@@ -77,7 +78,11 @@ public class TransactionFunctions
 
                 // Then get the paginated data
                 var query = $@"
-                SELECT * FROM SecurityBoxData 
+                SELECT 
+                    s.Id, s.TIMESTAMP, s.BoxID, s.EventCode, s.DoorState, s.FingerprintNum, s.TotalWeight, 
+                    s.BoxPosition, ISNULL(e.EventDescription, 'UNKNOWN') AS EventDescription, e.EventType, e.IsC2D
+                FROM SecurityBoxData AS s
+                LEFT JOIN dbo.EventCodes as e ON e.EventCode = s.EventCode 
                 ORDER BY {sortField} {sortDirection.ToUpper()}
                 OFFSET @Offset ROWS 
                 FETCH NEXT @PageSize ROWS ONLY";
@@ -91,16 +96,19 @@ public class TransactionFunctions
                     {
                         while (await reader.ReadAsync())
                         {
-                            transactions.Add(new SecurityBoxData
+                            transactions.Add(new SecurityBoxHistoryData
                             {
-                                Id = reader.GetInt32(reader.GetOrdinal("Id")),
-                                TimeStamp = reader.GetDateTime(reader.GetOrdinal("TimeStamp")),
-                                BoxID = reader.GetInt64(reader.GetOrdinal("BoxID")),
-                                EventCode = reader.GetString(reader.GetOrdinal("EventCode")),
-                                DoorState = reader.IsDBNull(reader.GetOrdinal("DoorState")) ? null : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("DoorState"))),
-                                FingerprintNum = reader.IsDBNull(reader.GetOrdinal("FingerprintNum")) ? null : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("FingerprintNum"))),
-                                TotalWeight = reader.IsDBNull(reader.GetOrdinal("TotalWeight")) ? null : Convert.ToSingle(reader.GetValue(reader.GetOrdinal("TotalWeight"))),
-                                BoxPosition = reader.IsDBNull(reader.GetOrdinal("BoxPosition")) ? null : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("BoxPosition")))
+                                Id = ConvertDBValue.ReadInt32(reader, "Id"),
+                                TimeStamp = ConvertDBValue.ReadDateTime(reader, "TimeStamp") ?? new DateTime(),
+                                BoxID = ConvertDBValue.ReadInt64(reader, "BoxID"),
+                                EventCode = ConvertDBValue.ReadString(reader, "EventCode"),
+                                DoorState = ConvertDBValue.ReadInt64(reader, "DoorState"),
+                                FingerprintNum = ConvertDBValue.ReadInt64(reader, "FingerprintNum"),
+                                TotalWeight = ConvertDBValue.ReadInt64(reader, "TotalWeight"),
+                                BoxPosition = ConvertDBValue.ReadInt64(reader, "BoxPosition"),
+                                EventDescription = ConvertDBValue.ReadString(reader, "EventDescription"),
+                                EventType = ConvertDBValue.ReadInt32(reader, "EventType"),
+                                IsC2D = ConvertDBValue.ReadInt32(reader, "IsC2D")
                             });
                         }
                     }
@@ -213,6 +221,6 @@ public class TransactionFunctions
     //         return new BadRequestObjectResult($"Error: {ex.Message}");
     //     }
     // }
-    
-    
+
+
 }
