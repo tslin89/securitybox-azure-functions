@@ -18,11 +18,13 @@ namespace SecurityBoxFunctions.Model.Entities
         public DateTime? ReceivedTime { get; set; }
     }
 
-    public class BoxEventDataDto : SecurityBoxData
+    public class UserBoxData : SecurityBoxData
     {
         public string DeviceID { get; set; }
-        public string Description { get; set; }
+        public string BoxDescription { get; set; }
         public DateTime? TimeStamp { get; set; }
+        public long? UserFingerprintNum { get; set; }
+        public long? UserID { get; set; }
     }
 
     public sealed class LoginRequest
@@ -38,6 +40,8 @@ namespace SecurityBoxFunctions.Model.Entities
         public string Email { get; set; }
         public string PhoneNo { get; set; }
         public long BoxID { get; set; }
+        public bool FingerprintEnabled { get; set; }
+        public int UserType { get; set; }
     }
 
     public sealed class IotSignal

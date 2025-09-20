@@ -22,6 +22,7 @@ using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
 using Microsoft.AspNetCore.Http.HttpResults;
 using System.Data;
 using Org.BouncyCastle.Asn1.Ocsp;
+using Microsoft.AspNetCore.Mvc.ModelBinding.Binders;
 
 
 namespace Winter.SecurityBox;
@@ -75,8 +76,8 @@ public partial class UserFunctions
 
                 var sql = @"
                 -- 1) user
-                SELECT TOP (1) UserID, UserName, Email, Password, PhoneNo, BoxID
-                FROM Users WHERE Email = @Email;
+                SELECT TOP (1) UserID, UserName, Email, Password, PhoneNo, BoxID, FingerprintEnabled, UserType
+                FROM Users WHERE Email = @Email AND IsEnabled = 1;
 
                 -- 2) boxes
                 SELECT BoxID, DeviceID, Description
@@ -109,11 +110,13 @@ public partial class UserFunctions
 
                 user = new Users
                 {
-                    UserID = r.GetInt32(r.GetOrdinal("UserID")),
-                    UserName = r.GetString(r.GetOrdinal("UserName")),
-                    Email = r.GetString(r.GetOrdinal("Email")),
-                    PhoneNo = r.IsDBNull(r.GetOrdinal("PhoneNo")) ? "" : r.GetString(r.GetOrdinal("PhoneNo")),
-                    BoxID = ReadInt64(r, "BoxID")
+                    UserID = ConvertDBValue.ReadInt32(r, "UserID"),
+                    UserName = ConvertDBValue.ReadString(r, "UserName"),
+                    Email = ConvertDBValue.ReadString(r, "Email"),
+                    PhoneNo = ConvertDBValue.ReadString(r, "PhoneNo"),
+                    BoxID = ConvertDBValue.ReadInt64(r, "BoxID"),
+                    FingerprintEnabled = ConvertDBValue.ReadBit(r, "FingerprintEnabled"),
+                    UserType = ConvertDBValue.ReadInt32(r, "UserType")
                 };
 
                 // boxes
@@ -134,7 +137,7 @@ public partial class UserFunctions
                     eventCodes.Add(new EventCodeDto(
                         EventCode: r.GetString(r.GetOrdinal("EventCode")),
                         EventDescription: r.IsDBNull(r.GetOrdinal("EventDescription")) ? "" : r.GetString(r.GetOrdinal("EventDescription")),
-                        EventType: ReadInt32(r, "EventType")
+                        EventType: ConvertDBValue.ReadInt32(r, "EventType")
                     ));
                 }
             }
@@ -279,15 +282,15 @@ public partial class UserFunctions
             {
                 users.Add(new UserDto
                 {
-                    UserID = ReadInt32(reader, "UserID"),
-                    UserName = ReadString(reader, "UserName"),
-                    Email = ReadString(reader, "Email"),
-                    PhoneNo = ReadString(reader, "PhoneNo"),
-                    UserType = ReadInt32(reader, "UserType"),
-                    FingerprintNum = ReadInt64(reader, "FingerprintNum"),
-                    FingerprintEnabled = ReadBit(reader, "FingerprintEnabled"),
-                    BoxID = ReadInt64(reader, "BoxID"),
-                    IsEnabled = ReadBit(reader, "IsEnabled"),
+                    UserID = ConvertDBValue.ReadInt32(reader, "UserID"),
+                    UserName = ConvertDBValue.ReadString(reader, "UserName"),
+                    Email = ConvertDBValue.ReadString(reader, "Email"),
+                    PhoneNo = ConvertDBValue.ReadString(reader, "PhoneNo"),
+                    UserType = ConvertDBValue.ReadInt32(reader, "UserType"),
+                    FingerprintNum = ConvertDBValue.ReadInt64(reader, "FingerprintNum"),
+                    FingerprintEnabled = ConvertDBValue.ReadBit(reader, "FingerprintEnabled"),
+                    BoxID = ConvertDBValue.ReadInt64(reader, "BoxID"),
+                    IsEnabled = ConvertDBValue.ReadBit(reader, "IsEnabled"),
                 });
             }
 
@@ -299,26 +302,6 @@ public partial class UserFunctions
         }
     }
 
-    // move these to utility class
-    private static int ReadInt32(SqlDataReader reader, string fieldName)
-    {
-        return reader.IsDBNull(reader.GetOrdinal(fieldName)) ? 0 : Convert.ToInt32(reader.GetValue(reader.GetOrdinal(fieldName)));
-    }
-
-    private static long ReadInt64(SqlDataReader reader, string fieldName)
-    {
-        return reader.IsDBNull(reader.GetOrdinal(fieldName)) ? 0 : Convert.ToInt64(reader.GetValue(reader.GetOrdinal(fieldName)));
-    }
-
-    private static bool ReadBit(SqlDataReader reader, string fieldName)
-    {
-        return reader.IsDBNull(reader.GetOrdinal(fieldName)) ? false : Convert.ToBoolean(reader.GetValue(reader.GetOrdinal(fieldName)));
-    }
-
-    private static string ReadString(SqlDataReader reader, string fieldName)
-    {
-        return reader.IsDBNull(reader.GetOrdinal(fieldName)) ? "" : Convert.ToString(reader.GetValue(reader.GetOrdinal(fieldName)));
-    }
 
     [Function("GetUser")]
     public async Task<IActionResult> GetUser(
@@ -344,15 +327,15 @@ public partial class UserFunctions
             {
                 var user = new UserDto
                 {
-                    UserID = ReadInt32(reader, "UserID"),
-                    UserName = ReadString(reader, "UserName"),
-                    Email = ReadString(reader, "Email"),
-                    PhoneNo = ReadString(reader, "PhoneNo"),
-                    UserType = ReadInt32(reader, "UserType"),
-                    FingerprintNum = ReadInt64(reader, "FingerprintNum"),
-                    FingerprintEnabled = ReadBit(reader, "FingerprintEnabled"),
-                    BoxID = ReadInt64(reader, "BoxID"),
-                    IsEnabled = ReadBit(reader, "IsEnabled"),
+                    UserID = ConvertDBValue.ReadInt32(reader, "UserID"),
+                    UserName = ConvertDBValue.ReadString(reader, "UserName"),
+                    Email = ConvertDBValue.ReadString(reader, "Email"),
+                    PhoneNo = ConvertDBValue.ReadString(reader, "PhoneNo"),
+                    UserType = ConvertDBValue.ReadInt32(reader, "UserType"),
+                    FingerprintNum = ConvertDBValue.ReadInt64(reader, "FingerprintNum"),
+                    FingerprintEnabled = ConvertDBValue.ReadBit(reader, "FingerprintEnabled"),
+                    BoxID = ConvertDBValue.ReadInt64(reader, "BoxID"),
+                    IsEnabled = ConvertDBValue.ReadBit(reader, "IsEnabled"),
                 };
 
                 return new OkObjectResult(user);
@@ -368,7 +351,7 @@ public partial class UserFunctions
 
     [Function("CreateUser")]
     public async Task<IActionResult> CreateUser(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "users")] HttpRequest req)
+    [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "users")] HttpRequest req)
     {
         try
         {
@@ -384,33 +367,65 @@ public partial class UserFunctions
             using var conn = new SqlConnection(_configuration["SqlConnectionString"]);
             await conn.OpenAsync();
 
-            // Check if email already exists
-            var checkCmd = new SqlCommand("SELECT COUNT(*) FROM dbo.Users WHERE Email = @Email", conn);
-            checkCmd.Parameters.AddWithValue("@Email", dto.Email);
-            var exists = (int)await checkCmd.ExecuteScalarAsync() > 0;
+            using var tx = conn.BeginTransaction();
 
-            if (exists)
+            try
             {
-                return new BadRequestObjectResult("Email already exists");
+                // 1) Check if email exists (inside the same transaction)
+                using (var checkCmd = new SqlCommand("SELECT COUNT(1) FROM dbo.Users WHERE Email = @Email", conn, tx))
+                {
+                    checkCmd.Parameters.Add("@Email", SqlDbType.NVarChar, 100).Value = dto.Email;
+                    var exists = (int)await checkCmd.ExecuteScalarAsync() > 0;
+                    if (exists)
+                    {
+                        tx.Rollback();
+                        return new BadRequestObjectResult("Email already exists");
+                    }
+                }
+
+                // 2) Insert user and get new UserID
+                int newUserId;
+                using (var cmd = new SqlCommand(@"
+                INSERT INTO dbo.Users (UserName, Email, PhoneNo, Password, UserType, FingerprintEnabled, IsEnabled)
+                OUTPUT INSERTED.UserID
+                VALUES (@UserName, @Email, @PhoneNo, @Password, @UserType, @FingerprintEnabled, @IsEnabled)
+            ", conn, tx))
+                {
+                    cmd.Parameters.Add("@UserName", SqlDbType.NVarChar, 50).Value = dto.UserName;
+                    cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 100).Value = dto.Email;
+                    cmd.Parameters.Add("@PhoneNo", SqlDbType.NVarChar, 20).Value = (object?)dto.PhoneNo ?? DBNull.Value;
+                    cmd.Parameters.Add("@Password", SqlDbType.NVarChar, 250).Value = dto.Password; // assuming already hashed
+                    cmd.Parameters.Add("@UserType", SqlDbType.Int).Value = dto.UserType;
+                    cmd.Parameters.Add("@FingerprintEnabled", SqlDbType.Bit).Value = (object?)dto.FingerprintEnabled ?? DBNull.Value;
+                    cmd.Parameters.Add("@IsEnabled", SqlDbType.Int).Value = (object?)dto.IsEnabled ?? DBNull.Value;
+
+                    newUserId = (int)await cmd.ExecuteScalarAsync();
+                }
+
+                // 3) Insert mapping into UserBoxes when BoxID is provided
+                // if (dto.BoxID != null)
+                // {
+                //     using var ubCmd = new SqlCommand(@"
+                //     INSERT INTO dbo.UserBoxes (UserID, BoxID, FingerprintNum)
+                //     VALUES (@UserID, @BoxID, NULL)
+                // ", conn, tx);
+
+                //     ubCmd.Parameters.Add("@UserID", SqlDbType.Int).Value = newUserId;
+                //     ubCmd.Parameters.Add("@BoxID", SqlDbType.BigInt).Value = dto.BoxID;
+
+                //     await ubCmd.ExecuteNonQueryAsync();
+                // }
+
+                // 4) Commit both inserts together
+                tx.Commit();
+
+                return new OkObjectResult(new { UserID = newUserId, Message = "User created successfully" });
             }
-
-            var cmd = new SqlCommand(@"
-            INSERT INTO dbo.Users (UserName, Email, PhoneNo, Password, UserType, FingerprintEnabled, IsEnabled, BoxID)
-            OUTPUT INSERTED.UserID
-            VALUES (@UserName, @Email, @PhoneNo, @Password, @UserType, @FingerprintEnabled, @IsEnabled, @BoxID)", conn);
-
-            cmd.Parameters.AddWithValue("@UserName", dto.UserName);
-            cmd.Parameters.AddWithValue("@Email", dto.Email);
-            cmd.Parameters.AddWithValue("@PhoneNo", (object?)dto.PhoneNo ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@Password", dto.Password); // Assume password is already hashed from client
-            cmd.Parameters.AddWithValue("@UserType", dto.UserType);
-            cmd.Parameters.AddWithValue("@FingerprintEnabled", (object?)dto.FingerprintEnabled ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@IsEnabled", (object?)dto.IsEnabled ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@BoxID", (object?)dto.BoxID ?? DBNull.Value);
-
-            var newUserId = (int)await cmd.ExecuteScalarAsync();
-
-            return new OkObjectResult(new { UserID = newUserId, Message = "User created successfully" });
+            catch (Exception exInner)
+            {
+                try { tx.Rollback(); } catch { /* ignore rollback errors */ }
+                return new BadRequestObjectResult($"Error: {exInner.Message}");
+            }
         }
         catch (Exception ex)
         {
@@ -537,11 +552,15 @@ public partial class UserFunctions
     {
         try
         {
+            long boxId = ConvertDBValue.ToInt64(req.Query["boxId"]);
+
             using var conn = new SqlConnection(_configuration["SqlConnectionString"]);
             await conn.OpenAsync();
 
-            var cmd = new SqlCommand("SELECT FingerprintNum FROM dbo.Users WHERE UserID = @UserID", conn);
+            //var cmd = new SqlCommand("SELECT FingerprintNum FROM dbo.Users WHERE UserID = @UserID", conn);
+            var cmd = new SqlCommand("SELECT FingerprintNum FROM dbo.UserBoxes WHERE UserID = @UserID AND BoxID = @BoxID", conn);
             cmd.Parameters.AddWithValue("@UserID", id);
+            cmd.Parameters.AddWithValue("@BoxID", boxId);
 
             var result = await cmd.ExecuteScalarAsync();
             var fingerprintNum = result == DBNull.Value ? null : (long?)result;
@@ -578,10 +597,10 @@ public partial class UserFunctions
             {
                 result.Add(new UserEventSettings
                 {
-                    EventCode = ReadString(reader, "EventCode"),
-                    EventDescription = ReadString(reader, "EventDescription"),
-                    EventType = ReadInt32(reader, "EventType"),
-                    NotificationEnabled = ReadBit(reader, "NotificationEnabled")
+                    EventCode = ConvertDBValue.ReadString(reader, "EventCode"),
+                    EventDescription = ConvertDBValue.ReadString(reader, "EventDescription"),
+                    EventType = ConvertDBValue.ReadInt32(reader, "EventType"),
+                    NotificationEnabled = ConvertDBValue.ReadBit(reader, "NotificationEnabled")
                 });
             }
 
@@ -634,6 +653,88 @@ public partial class UserFunctions
                 Status = (int)CommonEnum.ResponseStatus.Failed,
                 Message = ex.Message
             });
+        }
+    }
+
+
+    [Function("GetUserBoxData")]
+    public async Task<IActionResult> GetUserBoxData(
+    [HttpTrigger(AuthorizationLevel.Function, "get", Route = "users/{id:int}/boxdata")] HttpRequest req, int id)
+    {
+        try
+        {
+            string boxId = req.Query["boxID"].FirstOrDefault() ?? "0";
+
+            List<UserBoxData> result = new List<UserBoxData>();
+            using (SqlConnection conn = new SqlConnection(_configuration["SqlConnectionString"]))
+            {
+                await conn.OpenAsync();
+
+                // Then get the paginated data
+                var query = $@"
+                SELECT
+                    b.BoxID,
+                    b.DeviceID,
+                    b.Description AS BoxDescription,
+                    s.TimeStamp,
+                    s.EventCode,
+                    s.DoorState,
+                    s.TotalWeight,
+                    s.BoxPosition,
+                    s.ReceivedTime,
+                    s.FingerprintNum,
+                    ub.FingerprintNum AS UserFingerprintNum,
+                    u.UserID
+                FROM dbo.Boxes AS b
+                LEFT JOIN dbo.UserBoxes AS ub ON ub.BoxID = b.BoxID AND ub.UserID = @UserID 
+                LEFT JOIN dbo.Users AS u ON u.UserID = @UserID 
+                OUTER APPLY (
+                    SELECT TOP (1) s.*
+                    FROM dbo.SecurityBoxData AS s
+                    WHERE s.BoxID = b.BoxID
+                    ORDER BY COALESCE(s.ReceivedTime, s.TimeStamp) DESC, s.Id DESC
+                    ) AS s
+                WHERE (@BoxID IS NULL OR b.BoxID = @BoxID)
+                ORDER BY b.IsEnabled, b.BoxID;";
+
+                using (SqlCommand cmd = new SqlCommand(query, conn))
+                {
+                    cmd.Parameters.AddWithValue("@BoxID", boxId == "0" ? DBNull.Value : boxId);
+                    cmd.Parameters.AddWithValue("@UserID", id);
+
+                    using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
+                    {
+                        while (await reader.ReadAsync())
+                        {
+                            result.Add(new UserBoxData
+                            {
+                                TimeStamp = ConvertDBValue.ReadDateTime(reader, "TimeStamp"),
+                                BoxID = ConvertDBValue.ReadInt64(reader, "BoxID"),
+                                EventCode = ConvertDBValue.ReadString(reader, "EventCode"),
+                                DoorState = ConvertDBValue.ReadInt64(reader, "DoorState"),
+                                FingerprintNum = ConvertDBValue.ReadInt64(reader, "FingerprintNum"),
+                                TotalWeight = ConvertDBValue.ReadFloat(reader, "TotalWeight"),
+                                BoxPosition = ConvertDBValue.ReadInt64(reader, "BoxPosition"),
+                                ReceivedTime = ConvertDBValue.ReadDateTime(reader, "ReceivedTime"),
+                                DeviceID = ConvertDBValue.ReadString(reader, "DeviceID"),
+                                BoxDescription = ConvertDBValue.ReadString(reader, "BoxDescription"),
+                                UserFingerprintNum = ConvertDBValue.ReadInt64(reader, "UserFingerprintNum"),
+                                UserID = ConvertDBValue.ReadInt64(reader, "UserID")
+                            });
+                        }
+                    }
+                }
+            }
+
+            ResponseObject responseObj = new ResponseObject();
+            responseObj.Data = result;
+
+            return new OkObjectResult(responseObj);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error fetching transactions");
+            return new BadRequestObjectResult($"Error: {ex.Message}");
         }
     }
 

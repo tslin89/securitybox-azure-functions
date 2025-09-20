@@ -44,10 +44,10 @@ public class A2DFunctions
         if (body is null || string.IsNullOrWhiteSpace(body.DeviceId))
         {
             return new OkObjectResult(new ResponseObject
-                {
-                    Status = (int)CommonEnum.ResponseStatus.Failed,
-                    Message = $"Device ID required."
-                });
+            {
+                Status = (int)CommonEnum.ResponseStatus.Failed,
+                Message = $"Device ID required."
+            });
         }
 
         // Prepare C2D message
@@ -67,9 +67,10 @@ public class A2DFunctions
 
         var message = new Message(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new C2DObject
         {
-            EventCode = body.eventCode,
-            UserID = body.UserId,
-            FingerprintNum = body.fingerprintNum
+            EventCode = body.EventCode,
+            UserID = body.UserID,
+            BoxID = body.BoxID,
+            FingerprintNum = body.FingerprintNum
         })))
         {
             MessageId = Guid.NewGuid().ToString(),
@@ -94,16 +95,22 @@ public class A2DFunctions
             await _serviceClient.SendAsync(body.DeviceId, message);
             _logger.LogInformation("C2D message sent to DeviceId: {DeviceId}, MessageId: {MessageId}", body.DeviceId, message.MessageId);
 
-            return new OkObjectResult(new ResponseObject
+            if (body.EventCode == "D002") // remove fingerprint
             {
-                Status = (int)CommonEnum.ResponseStatus.Success,
-                Message = $"Message successfully sent to device."
-            });
+                await removeUserFingerprint(ConvertDBValue.ToInt64(body.UserID), body.BoxID);
+                        _logger.LogInformation($"Fingerprint removal completed at IoT device. User: {body.UserID}, BoxID: {body.FingerprintNum} removed from Database.");
+            }
+
+            return new OkObjectResult(new ResponseObject
+                {
+                    Status = (int)CommonEnum.ResponseStatus.Success,
+                    Message = $"Message successfully sent to device."
+                });
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to send C2D message to DeviceId: {DeviceId}, Error: {Message}", body.DeviceId, ex.Message);
-            
+
             return new BadRequestObjectResult(new ResponseObject
             {
                 Status = (int)CommonEnum.ResponseStatus.Failed,
@@ -112,17 +119,42 @@ public class A2DFunctions
         }
     }
 
+        private async Task removeUserFingerprint(long userID, long boxID)
+    {
+        try
+        {
+            using var conn = new SqlConnection(_configuration["SqlConnectionString"]);
+            await conn.OpenAsync();
+
+            var sql = $@"
+            DELETE FROM dbo.UserBoxes 
+            WHERE UserID = @UserID AND BoxID = @BoxID";
+
+            var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.AddWithValue("@UserID", userID);
+            cmd.Parameters.AddWithValue("@BoxID", boxID);
+
+            var rowsAffected = await cmd.ExecuteNonQueryAsync();
+        }
+        catch (Exception ex)
+        {
+            throw ex;
+        }
+    }
+
     private record StartReq(
         string DeviceId,
-        int UserId,
-        long? fingerprintNum,
-        string eventCode
+        int UserID,
+        long BoxID,
+        long? FingerprintNum,
+        string EventCode
     );
 
     private class C2DObject
     {
         public string EventCode { get; set; }
         public int UserID { get; set; }
+        public long BoxID { get; set; }
         public long? FingerprintNum { get; set; }
     }
 }

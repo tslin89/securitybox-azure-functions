@@ -136,81 +136,83 @@ public class TransactionFunctions
         }
     }
 
-    [Function("GetLastEventData")]
-    public async Task<IActionResult> GetLastEventData(
-    [HttpTrigger(AuthorizationLevel.Function, "get", Route = "transactions/lastevent")] HttpRequest req)
-    {
-        try
-        {
-            // Parse pagination parameters from query string
-            string boxId = req.Query["boxID"].FirstOrDefault() ?? "0";
-            string userId = req.Query["userID"].FirstOrDefault() ?? ""; // use later if necessary
+    // [Function("GetLastEventData")]
+    // public async Task<IActionResult> GetLastEventData(
+    // [HttpTrigger(AuthorizationLevel.Function, "get", Route = "transactions/lastevent")] HttpRequest req)
+    // {
+    //     try
+    //     {
+    //         // Parse pagination parameters from query string
+    //         string boxId = req.Query["boxID"].FirstOrDefault() ?? "0";
+    //         string userId = req.Query["userID"].FirstOrDefault() ?? ""; // use later if necessary
 
 
-            List<BoxEventDataDto> result = new List<BoxEventDataDto>();
-            using (SqlConnection conn = new SqlConnection(_configuration["SqlConnectionString"]))
-            {
-                await conn.OpenAsync();
+    //         List<BoxEventDataDto> result = new List<BoxEventDataDto>();
+    //         using (SqlConnection conn = new SqlConnection(_configuration["SqlConnectionString"]))
+    //         {
+    //             await conn.OpenAsync();
 
-                // Then get the paginated data
-                var query = $@"
-                SELECT
-                    b.BoxID,
-                    b.DeviceID,
-                    b.Description,
-                    s.TimeStamp,
-                    s.EventCode,
-                    s.DoorState,
-                    s.FingerprintNum,
-                    s.TotalWeight,
-                    s.BoxPosition,
-                    s.ReceivedTime
-                    FROM dbo.Boxes AS b
-                    OUTER APPLY (
-                        SELECT TOP 1 s.*
-                        FROM dbo.SecurityBoxData AS s
-                        WHERE s.BoxID = b.BoxID
-                        ORDER BY s.ReceivedTime DESC, s.Id DESC
-                        ) AS s
-                WHERE (@BoxID IS NULL OR b.BoxID = @BoxID)
-                AND b.IsEnabled = 1
-                ORDER BY b.BoxID;";
+    //             // Then get the paginated data
+    //             var query = $@"
+    //             SELECT
+    //                 b.BoxID,
+    //                 b.DeviceID,
+    //                 b.Description,
+    //                 s.TimeStamp,
+    //                 s.EventCode,
+    //                 s.DoorState,
+    //                 s.FingerprintNum,
+    //                 s.TotalWeight,
+    //                 s.BoxPosition,
+    //                 s.ReceivedTime
+    //                 FROM dbo.Boxes AS b
+    //                 OUTER APPLY (
+    //                     SELECT TOP 1 s.*
+    //                     FROM dbo.SecurityBoxData AS s
+    //                     WHERE s.BoxID = b.BoxID
+    //                     ORDER BY s.ReceivedTime DESC, s.Id DESC
+    //                     ) AS s
+    //             WHERE (@BoxID IS NULL OR b.BoxID = @BoxID)
+    //             AND b.IsEnabled = 1
+    //             ORDER BY b.BoxID;";
 
-                using (SqlCommand cmd = new SqlCommand(query, conn))
-                {
-                    cmd.Parameters.AddWithValue("@BoxID", boxId == "0"? DBNull.Value: boxId);
+    //             using (SqlCommand cmd = new SqlCommand(query, conn))
+    //             {
+    //                 cmd.Parameters.AddWithValue("@BoxID", boxId == "0" ? DBNull.Value : boxId);
 
-                    using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
-                    {
-                        while (await reader.ReadAsync())
-                        {
-                            result.Add(new BoxEventDataDto
-                            {
-                                TimeStamp = reader.IsDBNull(reader.GetOrdinal("TimeStamp")) ? null : reader.GetDateTime(reader.GetOrdinal("TimeStamp")),
-                                BoxID = reader.GetInt64(reader.GetOrdinal("BoxID")),
-                                EventCode = reader.IsDBNull(reader.GetOrdinal("EventCode"))? null:  reader.GetString(reader.GetOrdinal("EventCode")),
-                                DoorState = reader.IsDBNull(reader.GetOrdinal("DoorState")) ? null : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("DoorState"))),
-                                FingerprintNum = reader.IsDBNull(reader.GetOrdinal("FingerprintNum")) ? null : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("FingerprintNum"))),
-                                TotalWeight = reader.IsDBNull(reader.GetOrdinal("TotalWeight")) ? null : Convert.ToSingle(reader.GetValue(reader.GetOrdinal("TotalWeight"))),
-                                BoxPosition = reader.IsDBNull(reader.GetOrdinal("BoxPosition")) ? null : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("BoxPosition"))),
-                                ReceivedTime = reader.IsDBNull(reader.GetOrdinal("ReceivedTime")) ? null : reader.GetDateTime(reader.GetOrdinal("ReceivedTime")),
-                                DeviceID = reader.GetString(reader.GetOrdinal("DeviceID")),
-                                Description = reader.GetString(reader.GetOrdinal("Description")),
-                            });
-                        }
-                    }
-                }
-            }
+    //                 using (SqlDataReader reader = await cmd.ExecuteReaderAsync())
+    //                 {
+    //                     while (await reader.ReadAsync())
+    //                     {
+    //                         result.Add(new BoxEventDataDto
+    //                         {
+    //                             TimeStamp = reader.IsDBNull(reader.GetOrdinal("TimeStamp")) ? null : reader.GetDateTime(reader.GetOrdinal("TimeStamp")),
+    //                             BoxID = reader.GetInt64(reader.GetOrdinal("BoxID")),
+    //                             EventCode = reader.IsDBNull(reader.GetOrdinal("EventCode")) ? null : reader.GetString(reader.GetOrdinal("EventCode")),
+    //                             DoorState = reader.IsDBNull(reader.GetOrdinal("DoorState")) ? null : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("DoorState"))),
+    //                             FingerprintNum = reader.IsDBNull(reader.GetOrdinal("FingerprintNum")) ? null : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("FingerprintNum"))),
+    //                             TotalWeight = reader.IsDBNull(reader.GetOrdinal("TotalWeight")) ? null : Convert.ToSingle(reader.GetValue(reader.GetOrdinal("TotalWeight"))),
+    //                             BoxPosition = reader.IsDBNull(reader.GetOrdinal("BoxPosition")) ? null : Convert.ToInt64(reader.GetValue(reader.GetOrdinal("BoxPosition"))),
+    //                             ReceivedTime = reader.IsDBNull(reader.GetOrdinal("ReceivedTime")) ? null : reader.GetDateTime(reader.GetOrdinal("ReceivedTime")),
+    //                             DeviceID = reader.GetString(reader.GetOrdinal("DeviceID")),
+    //                             Description = reader.GetString(reader.GetOrdinal("Description")),
+    //                         });
+    //                     }
+    //                 }
+    //             }
+    //         }
 
-            ResponseObject responseObj = new ResponseObject();
-            responseObj.Data = result;
+    //         ResponseObject responseObj = new ResponseObject();
+    //         responseObj.Data = result;
 
-            return new OkObjectResult(responseObj);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error fetching transactions");
-            return new BadRequestObjectResult($"Error: {ex.Message}");
-        }
-    }
+    //         return new OkObjectResult(responseObj);
+    //     }
+    //     catch (Exception ex)
+    //     {
+    //         _logger.LogError(ex, "Error fetching transactions");
+    //         return new BadRequestObjectResult($"Error: {ex.Message}");
+    //     }
+    // }
+    
+    
 }

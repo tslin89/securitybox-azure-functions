@@ -14,6 +14,7 @@ using Microsoft.Azure.Functions.Worker;
 using System.Text.Json;
 using System.Data;
 using System.Net;
+using SecurityBoxFunctions.Library;
 
 namespace Winter.SecurityBox;
 
@@ -72,12 +73,21 @@ public class TestSignals
 
             if (inserted)
             {
-                if (sensorBoxData.EventCode == "C201" && sensorBoxData.FingerprintNum != 0 && sensorBoxData.UserID != 0)
+                if (ConvertDBValue.ToInt64(sensorBoxData.FingerprintNum) != 0 &&
+                    ConvertDBValue.ToInt64(sensorBoxData.UserID) != 0 &&
+                    ConvertDBValue.ToInt64(sensorBoxData.BoxID) != 0)
                 {
-                    // update fingerprint number for user
-                    await UpdateFingerprintNum(conn, sensorBoxData);
-
-                    _logger.LogInformation($"Fingerprint setup completed at IoT device. User: {sensorBoxData.UserID}, FingerprintNum: {sensorBoxData.FingerprintNum}");
+                    if (sensorBoxData.EventCode == "C201") // fingerprint added
+                    {
+                        await UpdateFingerprintNum(conn, sensorBoxData);
+                        _logger.LogInformation($"Fingerprint setup completed at IoT device. User: {sensorBoxData.UserID}, FingerprintNum: {sensorBoxData.FingerprintNum}.");
+                    }
+                    else if (sensorBoxData.EventCode == "C202") // fingerprint removed
+                    {
+                        // currently being removed from database after successful signal sent to device
+                        // await removeUserFingerprint(ConvertDBValue.ToInt64(sensorBoxData.UserID), sensorBoxData.BoxID);
+                        // _logger.LogInformation($"Fingerprint removal completed at IoT device. User: {sensorBoxData.UserID}, BoxID: {sensorBoxData.FingerprintNum} removed from Database.");
+                    }
                 }
 
                 var (signalRUserIDs, subs, msgMeta) = await GetNotificationRecipientsAsync(conn, sensorBoxData.BoxID, sensorBoxData.EventCode);
@@ -113,6 +123,8 @@ public class TestSignals
 
         return signalRMessages.ToArray();
     }
+
+
 
     private async Task SendWebPushBatchAsync(IEnumerable<PushSub> subs, string title, string body, string url)
     {
@@ -253,9 +265,16 @@ public class TestSignals
     private async Task UpdateFingerprintNum(SqlConnection conn, SecurityBoxData data)
     {
         var cmd = new SqlCommand(
-            @"UPDATE dbo.Users SET FingerprintNum = @fingerprintNum WHERE UserID = @userID", conn);
+            @"
+            IF EXISTS (SELECT 1 FROM UserBoxes WHERE UserID = @UserID AND BoxID = @BoxID)
+                UPDATE dbo.UserBoxes SET FingerprintNum = @FingerprintNum WHERE 
+                UserID = @UserID AND BoxID = @BoxID;
+            ELSE
+                INSERT INTO dbo.UserBoxes (UserID, BoxID, FingerprintNum)
+                VALUES (@UserID, @BoxID, @FingerprintNum);", conn);
 
-        cmd.Parameters.Add("@userID", SqlDbType.Int).Value = data.UserID;
+        cmd.Parameters.Add("@UserID", SqlDbType.Int).Value = data.UserID;
+        cmd.Parameters.Add("@BoxID", SqlDbType.Int).Value = data.BoxID;
         cmd.Parameters.Add("@fingerprintNum", SqlDbType.BigInt).Value = data.FingerprintNum;
 
         await cmd.ExecuteNonQueryAsync();
