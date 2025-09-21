@@ -1,7 +1,21 @@
 {
   "IsEncrypted": false,
   "Values": {
-    "AzureWebJobsStorage": "",
-    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated"
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "dotnet-isolated",
+    "SqlConnectionString": "Server=tcp:security-box-sql-server.database.windows.net,1433;Initial Catalog=security-box-db;Persist Security Info=False;User ID=dbadmin;Password=admin@12345;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;",
+    "Jwt:Key": "KUVn9sPO2vbtAypsr7OALgCrpuqTQzuWEXXuqDo3+J8idFeHnwPOmevSkYnYW+anCxiF/jNER/qA8ojKAi8Hzw==",
+    "Jwt:Issuer": "winter-security-system",
+    "Jwt:Audience": "securitybox-functions",
+    "AzureSignalRConnectionString": "Endpoint=https://security-box-signalr.service.signalr.net;AccessKey=Ah27aLPGhTq8Fh4RX5Xochs0tNYYs1mVMbyZWgKGIwfOVSOZfW8ZJQQJ99BIACL93NaXJ3w3AAAAASRSGioS;Version=1.0;",
+    "IoTHubConnectionString": "Endpoint=sb://ihsuprodsyres003dednamespace.servicebus.windows.net/;SharedAccessKeyName=iothubowner;SharedAccessKey=epUv281vcA0jc9q3Iu2R3OLBQFXLEN7SgAIoTOtnsnE=;EntityPath=iothub-ehub-security-b-56317008-6d7f4c3130",
+    "Vapid:PublicKey": "BCUVoQ_umbRV53LwdbPqq7jPHPLMpLi_drkf-PwZZb34LIVZ6DOMQW2ZbRddAAh-BSgMF_Hk8gOPfIREcUYV9ac",
+    "Vapid:PrivateKey": "NSTofdCxzL5XK1Hjos5O59ipL_Zesl_S5SHc9Iw_EpE",
+    "Vapid:Subject": "https://localhost",
+    "IoTHub2DeviceConnection": "HostName=security-box-iot-hub.azure-devices.net;SharedAccessKeyName=iothubowner;SharedAccessKey=epUv281vcA0jc9q3Iu2R3OLBQFXLEN7SgAIoTOtnsnE="
+  },
+  "Host": {
+    "CORS": "http://localhost:5173,http://localhost:3000",
+    "CORSCredentials": true
   }
 }
