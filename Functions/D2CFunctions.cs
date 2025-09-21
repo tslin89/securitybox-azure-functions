@@ -190,9 +190,7 @@ public class TestSignals
                 FROM dbo.Users u
                 LEFT JOIN dbo.UserEventSettings s
                     ON s.UserID = u.UserID AND s.EventCode = @EventCode
-                LEFT JOIN dbo.UserBoxes as ub 
-                    ON ub.UserID = u.UserID
-                WHERE ub.BoxID = @BoxID
+                WHERE 1=1
                 AND ISNULL(u.IsEnabled, 1) = 1
                 AND COALESCE(s.NotificationEnabled, 1) = 1;  -- default allow
 
