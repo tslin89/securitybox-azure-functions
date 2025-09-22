@@ -9,21 +9,8 @@ using System.Data.SqlClient;
 using SecurityBoxFunctions.Model.Entities;
 using System.Text.RegularExpressions;
 using System.Text.Json;
-using BCrypt.Net;
-using System.IdentityModel.Tokens.Jwt;
-using Microsoft.IdentityModel.Tokens;
-using System.Security.Claims;
 using SecurityBoxFunctions.Library;
-using Microsoft.Azure.SignalR.Management;
-using System.Text.Json.Serialization;
-using Microsoft.Azure.SignalR.Management;
-using System.Text.Json.Serialization;
-using Microsoft.Azure.Functions.Worker.Extensions.SignalRService;
-using Microsoft.AspNetCore.Http.HttpResults;
 using System.Data;
-using Org.BouncyCastle.Asn1.Ocsp;
-using Microsoft.AspNetCore.Mvc.ModelBinding.Binders;
-
 
 namespace Winter.SecurityBox;
 
@@ -141,18 +128,7 @@ public partial class UserFunctions
                 }
             }
 
-            //bool ok = BCrypt.Net.BCrypt.Verify(login.Password, passwordHash);
-            //if (!ok)
-            //    return new UnauthorizedObjectResult(new { error = "Invalid credentials" });
-
-            // initiate SignalR connection info
-            //var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
-            //response.WriteAsJsonAsync(connectionInfo);
-
-
             ResponseObject responseObj = null;
-
-            //var signalR = await GetSignalRInfoAsync("alerts", user.UserID.ToString());
 
             string token = Utilities.GenerateJWTToken(user.Email,
                 _configuration["Jwt:Key"],
@@ -164,8 +140,8 @@ public partial class UserFunctions
             {
                 Token = token,
                 User = user,
-                BoxList = boxes,       // your (1)
-                EventCodes = eventCodes // your (2)
+                BoxList = boxes,
+                EventCodes = eventCodes
             };
 
             return new OkObjectResult(responseObj);
@@ -296,7 +272,6 @@ public partial class UserFunctions
         }
     }
 
-
     [Function("GetUser")]
     public async Task<IActionResult> GetUser(
         [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "users/{id:int}")] HttpRequest req,
@@ -393,20 +368,6 @@ public partial class UserFunctions
 
                     newUserId = (int)await cmd.ExecuteScalarAsync();
                 }
-
-                // 3) Insert mapping into UserBoxes when BoxID is provided
-                // if (dto.BoxID != null)
-                // {
-                //     using var ubCmd = new SqlCommand(@"
-                //     INSERT INTO dbo.UserBoxes (UserID, BoxID, FingerprintNum)
-                //     VALUES (@UserID, @BoxID, NULL)
-                // ", conn, tx);
-
-                //     ubCmd.Parameters.Add("@UserID", SqlDbType.Int).Value = newUserId;
-                //     ubCmd.Parameters.Add("@BoxID", SqlDbType.BigInt).Value = dto.BoxID;
-
-                //     await ubCmd.ExecuteNonQueryAsync();
-                // }
 
                 // 4) Commit both inserts together
                 tx.Commit();
@@ -648,7 +609,6 @@ public partial class UserFunctions
         }
     }
 
-
     [Function("GetUserBoxData")]
     public async Task<IActionResult> GetUserBoxData(
     [HttpTrigger(AuthorizationLevel.Function, "get", Route = "users/{id:int}/boxdata")] HttpRequest req, int id)
@@ -730,5 +690,4 @@ public partial class UserFunctions
             return new BadRequestObjectResult($"Error: {ex.Message}");
         }
     }
-
 }

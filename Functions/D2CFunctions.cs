@@ -2,15 +2,12 @@ using System.Text;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
-using Microsoft.Azure.Functions.Worker.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using System.Data.SqlClient;
 using SecurityBoxFunctions.Model.Entities;
 using WebPush;
-
 using Azure.Messaging.EventHubs;
-using Microsoft.Azure.Functions.Worker;
 using System.Text.Json;
 using System.Data;
 using System.Net;
@@ -29,25 +26,6 @@ public class TestSignals
         _logger = logger;
         _configuration = configuration;
     }
-
-    // [Function("TriggerSignalR")]
-    // [SignalROutput(HubName = "alerts", ConnectionStringSetting = "AzureSignalRConnectionString")]
-    // public async Task<SignalRMessageAction[]> SendTestSignalRData(
-    // [HttpTrigger(AuthorizationLevel.Anonymous, "get", "post")] HttpRequestData req)
-    // {
-    //     _logger.LogInformation("TestSignalRAlert function triggered");
-
-    //     var body = await new StreamReader(req.Body).ReadToEndAsync();
-
-    //     var signalRMessages = new List<SignalRMessageAction>();
-
-    //     signalRMessages.Add(new SignalRMessageAction("newAlert", new[] { body }));
-
-    //     // var response = req.CreateResponse(System.Net.HttpStatusCode.OK);
-    //     // await response.WriteStringAsync("SignalR test messages sent!");
-
-    //     return signalRMessages.ToArray();
-    // }
 
     [Function("ProcessSecurityBoxIoTMessage")]
     [SignalROutput(HubName = "alerts")]
@@ -92,16 +70,13 @@ public class TestSignals
 
                 var (signalRUserIDs, subs, msgMeta) = await GetNotificationRecipientsAsync(conn, sensorBoxData.BoxID, sensorBoxData.EventCode);
 
-
                 // 1) Trigger SignalR
-                // SignalR per user (keep same Target)
-                //signalRMessages.Add(new SignalRMessageAction("newAlert", new object[] { msg }));
                 foreach (var uid in signalRUserIDs)
                 {
                     signalRMessages.Add(new SignalRMessageAction("newAlert")  // <-- target here
                     {
                         UserId = uid.ToString(),
-                        Arguments = new object[] { msg }  // pass your payload
+                        Arguments = new object[] { msg }
                     });
                 }
 
@@ -117,14 +92,10 @@ public class TestSignals
                 pushTasks.Add(SendWebPushBatchAsync(subs, title, body, url));
             }
         }
-
-        // ✅ wait for all pushes before finishing the function
         await Task.WhenAll(pushTasks);
 
         return signalRMessages.ToArray();
     }
-
-
 
     private async Task SendWebPushBatchAsync(IEnumerable<PushSub> subs, string title, string body, string url)
     {
@@ -137,7 +108,6 @@ public class TestSignals
 
         var payload = JsonSerializer.Serialize(new { title, body, url });
 
-        // sequential is fine at your scale; throttle/parallelize later if needed
         foreach (var s in subs)
         {
             try
@@ -343,46 +313,6 @@ public class TestSignals
         return list;
     }
 
-    private async Task SendWebPushAsyncForMessageAsync(string rawJson)
-    {
-        // Optional: only push for certain events (keeps SignalR realtime for everything)
-        // try
-        // {
-        //     using var doc = JsonDocument.Parse(rawJson);
-        //     if (doc.RootElement.TryGetProperty("EventCode", out var ec) &&
-        //         !string.Equals(ec.GetString(), "C999", StringComparison.OrdinalIgnoreCase))
-        //     {
-        //         // Not an alert → skip push
-        //         return;
-        //     }
-        // }
-        // catch
-        // {
-        //     // Not valid JSON – push anyway or skip; up to you
-        // }
-
-        // temporarily send code only
-        using var doc = JsonDocument.Parse(rawJson);
-        doc.RootElement.TryGetProperty("EventCode", out var eventCode);
-        doc.RootElement.TryGetProperty("BoxID", out var boxID);
-
-        try
-        {
-            var title = "SecurityBox Alert";
-            var body = $"Box: {Convert.ToString(boxID)} - Event Code: {Convert.ToString(eventCode)}"; //rawJson           // keep as-is to avoid DateTime format issues
-            var url = "/dashboard";      // where you want taps to land in your PWA
-
-            var subs = await GetAllSubscriptionsAsync(); // implement as shown earlier
-            if (subs.Count == 0) return;
-
-            await SendWebPushAsync(subs, title, body, url);
-        }
-        catch (Exception ex)
-        {
-            string msg = ex.Message;
-        }
-    }
-
     public sealed class PushSubscriptionDtoTest
     {
         public string endpoint { get; set; } = "";
@@ -390,36 +320,6 @@ public class TestSignals
         public Keys keys { get; set; } = default!;
         public sealed class Keys { public string p256dh { get; set; } = ""; public string auth { get; set; } = ""; }
     }
-
-    // [Function("PushTest")]
-    // public async Task<HttpResponseData> PushTest(
-    // [HttpTrigger(AuthorizationLevel.Anonymous, "post", Route = "push/test")] HttpRequestData req)
-    // {
-    //     var body = await new StreamReader(req.Body).ReadToEndAsync();
-    //     var dto = JsonSerializer.Deserialize<PushSubscriptionDtoTest>(body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
-    //     var vapid = new VapidDetails(
-    //         _configuration["Vapid:Subject"],
-    //         _configuration["Vapid:PublicKey"],
-    //         _configuration["Vapid:PrivateKey"]);
-
-    //     var payload = JsonSerializer.Serialize(new { title = "Test Push", body = "Hello from server", url = "/dashboard" });
-
-    //     try
-    //     {
-    //         var sub = new PushSubscription(dto!.endpoint, dto.keys.p256dh, dto.keys.auth);
-    //         await _push.SendNotificationAsync(sub, payload, vapid);
-    //         var ok = req.CreateResponse(System.Net.HttpStatusCode.OK);
-    //         await ok.WriteStringAsync("sent");
-    //         return ok;
-    //     }
-    //     catch (Exception ex)
-    //     {
-    //         var bad = req.CreateResponse(System.Net.HttpStatusCode.BadRequest);
-    //         await bad.WriteStringAsync(ex.ToString());
-    //         return bad;
-    //     }
-    // }
 
     #region Browser Push-Notifications
     private readonly WebPushClient _push = new();
@@ -438,8 +338,6 @@ public class TestSignals
             {
                 var sub = new PushSubscription(s.Endpoint, s.P256dh, s.Auth);
                 await _push.SendNotificationAsync(sub, payload, vapid);
-                //await _push.SendNotificationAsync(sub, "hello-azure-function", vapid);
-                //await _push.SendNotificationAsync(sub, null, vapid);
                 _logger.LogInformation("[WebPush-OK] sent to {Endpoint} | {p256} | {auth} | {pbkey}", s.Endpoint, s.P256dh, s.Auth, vapid.PublicKey);
             }
             catch (WebPushException ex) when (ex.StatusCode == System.Net.HttpStatusCode.Gone ||
@@ -459,12 +357,13 @@ public class TestSignals
             }
         }
     }
+
     private async Task<List<StoredPushSubscription>> GetSubscriptionsForUserAsync(int userId)
     {
         using var conn = new SqlConnection(_configuration["SqlConnectionString"]);
         await conn.OpenAsync();
         var cmd = new SqlCommand(@"SELECT UserId, Endpoint, P256dh, Auth, CreatedAt, ExpirationTime
-                               FROM dbo.PushSubscriptions WHERE UserId=@UserId", conn);
+                               FROM dbo.PushSubscriptions WHERE UserId=@UserId;", conn);
         cmd.Parameters.AddWithValue("@UserId", userId);
 
         var list = new List<StoredPushSubscription>();
@@ -546,7 +445,7 @@ public class TestSignals
         await conn.OpenAsync();
 
         using var cmd = new SqlCommand(
-            "DELETE FROM dbo.PushSubscriptions WHERE Endpoint = @Endpoint", conn);
+            "DELETE FROM dbo.PushSubscriptions WHERE Endpoint = @Endpoint;", conn);
         cmd.Parameters.AddWithValue("@Endpoint", endpoint);
 
         return await cmd.ExecuteNonQueryAsync(); // rows deleted
