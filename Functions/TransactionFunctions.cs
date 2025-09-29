@@ -79,7 +79,7 @@ public class TransactionFunctions
                 var query = $@"
                 SELECT 
                     s.Id, s.TIMESTAMP, s.BoxID, s.EventCode, s.DoorState, s.FingerprintNum, s.TotalWeight, 
-                    s.BoxPosition, ISNULL(e.EventDescription, 'UNKNOWN') AS EventDescription, e.EventType, e.IsC2D
+                    s.BoxPosition, s.SecurityStatus, ISNULL(e.EventDescription, 'UNKNOWN') AS EventDescription, e.EventType, e.IsC2D
                 FROM SecurityBoxData AS s
                 LEFT JOIN dbo.EventCodes as e ON e.EventCode = s.EventCode 
                 ORDER BY {sortField} {sortDirection.ToUpper()}
@@ -105,6 +105,7 @@ public class TransactionFunctions
                                 FingerprintNum = ConvertDBValue.ReadInt64(reader, "FingerprintNum"),
                                 TotalWeight = ConvertDBValue.ReadInt64(reader, "TotalWeight"),
                                 BoxPosition = ConvertDBValue.ReadInt64(reader, "BoxPosition"),
+                                SecurityStatus = ConvertDBValue.ReadInt64(reader, "SecurityStatus"),
                                 EventDescription = ConvertDBValue.ReadString(reader, "EventDescription"),
                                 EventType = ConvertDBValue.ReadInt32(reader, "EventType"),
                                 IsC2D = ConvertDBValue.ReadInt32(reader, "IsC2D")

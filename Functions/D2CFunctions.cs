@@ -268,12 +268,13 @@ public class TestSignals
                     AND ((FingerprintNum = @FingerprintNum) OR (FingerprintNum IS NULL AND @FingerprintNum IS NULL))
                     AND ((TotalWeight = @TotalWeight) OR (TotalWeight IS NULL AND @TotalWeight IS NULL))
                     AND ((BoxPosition = @BoxPosition) OR (BoxPosition IS NULL AND @BoxPosition IS NULL))
+                    AND ((SecurityStatus = @SecurityStatus) OR (SecurityStatus IS NULL AND @SecurityStatus IS NULL))
             )
             BEGIN
                 INSERT INTO dbo.SecurityBoxData (
-                    TimeStamp, BoxID, EventCode, DoorState, FingerprintNum, TotalWeight, BoxPosition, ReceivedTime
+                    TimeStamp, BoxID, EventCode, DoorState, FingerprintNum, TotalWeight, BoxPosition, SecurityStatus, ReceivedTime
                 ) VALUES (
-                    @TimeStamp, @BoxID, @EventCode, @DoorState, @FingerprintNum, @TotalWeight, @BoxPosition, @ReceivedTime
+                    @TimeStamp, @BoxID, @EventCode, @DoorState, @FingerprintNum, @TotalWeight, @BoxPosition, @SecurityStatus, @ReceivedTime
                 );
                 SELECT CAST(1 AS bit);
             END
@@ -289,6 +290,7 @@ public class TestSignals
         cmd.Parameters.Add("@FingerprintNum", SqlDbType.BigInt).Value = (object?)data.FingerprintNum ?? DBNull.Value;
         cmd.Parameters.Add("@TotalWeight", SqlDbType.Float).Value = (object?)data.TotalWeight ?? DBNull.Value;
         cmd.Parameters.Add("@BoxPosition", SqlDbType.BigInt).Value = (object?)data.BoxPosition ?? DBNull.Value;
+        cmd.Parameters.Add("@SecurityStatus", SqlDbType.BigInt).Value = (object?)data.SecurityStatus ?? DBNull.Value;
         cmd.Parameters.Add("@ReceivedTime", SqlDbType.DateTime).Value = DateTime.Now;
 
         var inserted = (bool)await cmd.ExecuteScalarAsync();

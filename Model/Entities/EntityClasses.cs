@@ -13,6 +13,7 @@ namespace SecurityBoxFunctions.Model.Entities
         public long? FingerprintNum { get; set; }
         public float? TotalWeight { get; set; }
         public long? BoxPosition { get; set; }
+        public long? SecurityStatus { get; set; }
         public long? UserID { get; set; }
         public string? TransactionID { get; set; }
         public DateTime? ReceivedTime { get; set; }
