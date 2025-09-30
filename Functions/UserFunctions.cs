@@ -63,12 +63,19 @@ public partial class UserFunctions
 
                 var sql = @"
                 -- 1) user
-                SELECT TOP (1) UserID, UserName, Email, Password, PhoneNo, FingerprintEnabled, UserType
+                DECLARE @UserID INT;
+
+                SELECT @UserID = UserID
                 FROM Users WHERE Email = @Email AND IsEnabled = 1;
 
+                SELECT TOP (1) UserID, UserName, Email, Password, PhoneNo, FingerprintEnabled, UserType
+                FROM Users WHERE UserID = @UserID;
+
                 -- 2) boxes
-                SELECT BoxID, DeviceID, Description
-                FROM dbo.Boxes WHERE IsEnabled = 1;
+                SELECT DISTINCT b.BoxID, b.DeviceID, b.Description, ub.UserRole
+                FROM dbo.Boxes as b 
+                INNER JOIN dbo.UserBoxes as ub ON ub.BoxID = b.BoxID
+                WHERE b.IsEnabled = 1 AND ub.UserID = @UserID
 
                 -- 3) event codes
                 SELECT EventCode, EventDescription, EventType
@@ -76,7 +83,6 @@ public partial class UserFunctions
 
                 await using var cmd = new SqlCommand(sql, conn);
                 cmd.Parameters.AddWithValue("@Email", login.Email);
-
                 await using var r = await cmd.ExecuteReaderAsync();
 
                 // user
@@ -110,9 +116,10 @@ public partial class UserFunctions
                 while (await r.ReadAsync())
                 {
                     boxes.Add(new BoxDto(
-                        BoxID: r.GetInt64(r.GetOrdinal("BoxID")),
-                        DeviceID: r.IsDBNull(r.GetOrdinal("DeviceID")) ? "" : r.GetString(r.GetOrdinal("DeviceID")),
-                        Description: r.IsDBNull(r.GetOrdinal("Description")) ? "" : r.GetString(r.GetOrdinal("Description"))
+                        BoxID: ConvertDBValue.ReadInt64(r, "BoxID"),
+                        DeviceID: ConvertDBValue.ReadString(r, "DeviceID"),
+                        Description: ConvertDBValue.ReadString(r, "Description"),
+                        UserRole: ConvertDBValue.ReadInt32(r, "UserRole")
                     ));
                 }
 
@@ -121,8 +128,8 @@ public partial class UserFunctions
                 while (await r.ReadAsync())
                 {
                     eventCodes.Add(new EventCodeDto(
-                        EventCode: r.GetString(r.GetOrdinal("EventCode")),
-                        EventDescription: r.IsDBNull(r.GetOrdinal("EventDescription")) ? "" : r.GetString(r.GetOrdinal("EventDescription")),
+                        EventCode: ConvertDBValue.ReadString(r, "EventCode"),
+                        EventDescription: ConvertDBValue.ReadString(r, "EventDescription"),
                         EventType: ConvertDBValue.ReadInt32(r, "EventType")
                     ));
                 }
@@ -171,7 +178,12 @@ public partial class UserFunctions
         }
     }
 
-    public record BoxDto(long BoxID, string DeviceID, string Description);
+    public record BoxDto(
+        long BoxID,
+        string DeviceID,
+        string Description,
+        int UserRole
+    );
     public record EventCodeDto(string EventCode, string EventDescription, int EventType);
 
     [Function("negotiateSignalR")]
@@ -205,6 +217,8 @@ public partial class UserFunctions
         public int UserType { get; set; }
         public bool? FingerprintEnabled { get; set; }
         public bool IsEnabled { get; set; }
+
+        public List<UserBoxes> UserBoxes { get; set; }
     }
 
     public class CreateUserDto
@@ -217,6 +231,8 @@ public partial class UserFunctions
         public bool? FingerprintEnabled { get; set; }
         public long BoxID { get; set; }
         public bool IsEnabled { get; set; }
+
+        public List<long> BoxIds { get; set; }
     }
 
     public class UpdateUserDto
@@ -229,6 +245,8 @@ public partial class UserFunctions
         public int UserType { get; set; }
         public bool? FingerprintEnabled { get; set; }
         public bool IsEnabled { get; set; }
+
+        public List<long> BoxIds { get; set; }
     }
 
     // Azure Functions
@@ -274,47 +292,61 @@ public partial class UserFunctions
 
     [Function("GetUser")]
     public async Task<IActionResult> GetUser(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "users/{id:int}")] HttpRequest req,
-        int id)
+    [HttpTrigger(AuthorizationLevel.Anonymous, "get", Route = "users/{id:int}")] HttpRequest req,
+    int id)
     {
         try
         {
             using var conn = new SqlConnection(_configuration["SqlConnectionString"]);
             await conn.OpenAsync();
 
-            var cmd = new SqlCommand(@"
-            SELECT UserID, UserName, Email, PhoneNo, UserType, 
-                   FingerprintEnabled, IsEnabled
-            FROM dbo.Users 
-            WHERE UserID = @UserID", conn);
+            var sql = @"
+                SELECT UserID, UserName, Email, PhoneNo, UserType, FingerprintEnabled, IsEnabled
+                FROM dbo.Users 
+                WHERE UserID = @UserID;
 
-            cmd.Parameters.AddWithValue("@UserID", id);
+                -- guest boxes (for editing BoxIds)
+                SELECT ub.BoxID, ub.UserRole
+                FROM dbo.UserBoxes AS ub
+                WHERE ub.UserID = @UserID";
 
-            using var reader = await cmd.ExecuteReaderAsync();
+            using var cmd = new SqlCommand(sql, conn);
+            cmd.Parameters.Add("@UserID", SqlDbType.Int).Value = id;
 
-            if (await reader.ReadAsync())
+            using var r = await cmd.ExecuteReaderAsync();
+
+            if (!await r.ReadAsync())
+                return new NotFoundObjectResult("User not found");
+
+            var user = new UserDto
             {
-                var user = new UserDto
+                UserID = ConvertDBValue.ReadInt32(r, "UserID"),
+                UserName = ConvertDBValue.ReadString(r, "UserName"),
+                Email = ConvertDBValue.ReadString(r, "Email"),
+                PhoneNo = ConvertDBValue.ReadString(r, "PhoneNo"),
+                UserType = ConvertDBValue.ReadInt32(r, "UserType"),
+                FingerprintEnabled = ConvertDBValue.ReadBit(r, "FingerprintEnabled"),
+                IsEnabled = ConvertDBValue.ReadBit(r, "IsEnabled"),
+                UserBoxes = new List<UserBoxes>(),         // guest mappings
+            };
+
+            // guest BoxIds
+            await r.NextResultAsync();
+            while (await r.ReadAsync())
+                user.UserBoxes.Add(new UserBoxes
                 {
-                    UserID = ConvertDBValue.ReadInt32(reader, "UserID"),
-                    UserName = ConvertDBValue.ReadString(reader, "UserName"),
-                    Email = ConvertDBValue.ReadString(reader, "Email"),
-                    PhoneNo = ConvertDBValue.ReadString(reader, "PhoneNo"),
-                    UserType = ConvertDBValue.ReadInt32(reader, "UserType"),
-                    FingerprintEnabled = ConvertDBValue.ReadBit(reader, "FingerprintEnabled"),
-                    IsEnabled = ConvertDBValue.ReadBit(reader, "IsEnabled"),
-                };
+                    BoxID = ConvertDBValue.ReadInt64(r, "BoxID"),
+                    UserRole = ConvertDBValue.ReadInt32(r, "UserRole")
+                });
 
-                return new OkObjectResult(user);
-            }
-
-            return new NotFoundObjectResult("User not found");
+            return new OkObjectResult(user);
         }
         catch (Exception ex)
         {
             return new BadRequestObjectResult($"Error: {ex.Message}");
         }
     }
+
 
     [Function("CreateUser")]
     public async Task<IActionResult> CreateUser(
@@ -338,11 +370,11 @@ public partial class UserFunctions
 
             try
             {
-                // 1) Check if email exists (inside the same transaction)
-                using (var checkCmd = new SqlCommand("SELECT COUNT(1) FROM dbo.Users WHERE Email = @Email", conn, tx))
+                // 1) Check if email exists
+                using (var checkCmd = new SqlCommand("SELECT 1 FROM dbo.Users WHERE Email = @Email", conn, tx))
                 {
                     checkCmd.Parameters.Add("@Email", SqlDbType.NVarChar, 100).Value = dto.Email;
-                    var exists = (int)await checkCmd.ExecuteScalarAsync() > 0;
+                    var exists = (await checkCmd.ExecuteScalarAsync()) != null;
                     if (exists)
                     {
                         tx.Rollback();
@@ -353,23 +385,73 @@ public partial class UserFunctions
                 // 2) Insert user and get new UserID
                 int newUserId;
                 using (var cmd = new SqlCommand(@"
-                INSERT INTO dbo.Users (UserName, Email, PhoneNo, Password, UserType, FingerprintEnabled, IsEnabled)
-                OUTPUT INSERTED.UserID
-                VALUES (@UserName, @Email, @PhoneNo, @Password, @UserType, @FingerprintEnabled, @IsEnabled)
+                    INSERT INTO dbo.Users (UserName, Email, PhoneNo, Password, UserType, FingerprintEnabled, IsEnabled)
+                    OUTPUT INSERTED.UserID
+                    VALUES (@UserName, @Email, @PhoneNo, @Password, @UserType, @FingerprintEnabled, @IsEnabled);
             ", conn, tx))
                 {
                     cmd.Parameters.Add("@UserName", SqlDbType.NVarChar, 50).Value = dto.UserName;
                     cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 100).Value = dto.Email;
                     cmd.Parameters.Add("@PhoneNo", SqlDbType.NVarChar, 20).Value = (object?)dto.PhoneNo ?? DBNull.Value;
-                    cmd.Parameters.Add("@Password", SqlDbType.NVarChar, 250).Value = dto.Password; // assuming already hashed
+
+                    // TODO: hash server-side; for now assuming already hashed if that’s your current practice
+                    cmd.Parameters.Add("@Password", SqlDbType.NVarChar, 250).Value = dto.Password;
+
                     cmd.Parameters.Add("@UserType", SqlDbType.Int).Value = dto.UserType;
-                    cmd.Parameters.Add("@FingerprintEnabled", SqlDbType.Bit).Value = (object?)dto.FingerprintEnabled ?? DBNull.Value;
-                    cmd.Parameters.Add("@IsEnabled", SqlDbType.Int).Value = (object?)dto.IsEnabled ?? DBNull.Value;
+                    cmd.Parameters.Add("@FingerprintEnabled", SqlDbType.Bit).Value = dto.FingerprintEnabled;
+                    cmd.Parameters.Add("@IsEnabled", SqlDbType.Bit).Value = dto.IsEnabled;
 
                     newUserId = (int)await cmd.ExecuteScalarAsync();
                 }
 
-                // 4) Commit both inserts together
+                // 3) Merge UserBoxes as 'Guest' if BoxIds is provided (null = no changes)
+                if (dto.BoxIds is not null)
+                {
+                    var boxIdsJson = JsonSerializer.Serialize(dto.BoxIds);
+
+                    using var mergeCmd = new SqlCommand(@"
+                    DECLARE @pUserID INT = @UserIDParam;
+                    DECLARE @pBoxIdsJson NVARCHAR(MAX) = @BoxIdsJsonParam;
+
+                    DECLARE @GuestRole INT = 0;  -- 0 = Guest, 1 = Owner
+
+                    -- Build a table of BoxIDs from JSON (may be empty if '[]')
+                    DECLARE @BoxIds TABLE (BoxID BIGINT PRIMARY KEY);
+
+                    IF @pBoxIdsJson IS NOT NULL AND @pBoxIdsJson <> N''
+                    BEGIN
+                        INSERT @BoxIds (BoxID)
+                        SELECT TRY_CAST([value] AS BIGINT)
+                        FROM OPENJSON(@pBoxIdsJson)
+                        WHERE TRY_CAST([value] AS BIGINT) IS NOT NULL;
+                    END;
+
+                    MERGE dbo.UserBoxes AS t
+                    USING @BoxIds AS s
+                    ON (t.UserID = @pUserID AND t.BoxID = s.BoxID)
+
+                    -- Insert missing as Guest
+                    WHEN NOT MATCHED BY TARGET THEN
+                    INSERT (UserID, BoxID, UserRole, FingerprintNum)
+                    VALUES (@pUserID, s.BoxID, @GuestRole, NULL)
+
+                    -- Delete only Guest rows not in the new list
+                    WHEN NOT MATCHED BY SOURCE
+                        AND t.UserID = @pUserID
+                        AND t.UserRole = @GuestRole
+                    THEN
+                    DELETE;
+                    ", conn, tx);
+
+                    mergeCmd.Parameters.Add("@UserIDParam", SqlDbType.Int).Value = newUserId;
+                    mergeCmd.Parameters.Add("@BoxIdsJsonParam", SqlDbType.NVarChar, -1)
+                            .Value = (object)boxIdsJson ?? DBNull.Value;
+
+                    await mergeCmd.ExecuteNonQueryAsync();
+                }
+
+
+                // 4) Commit everything
                 tx.Commit();
 
                 return new OkObjectResult(new { UserID = newUserId, Message = "User created successfully" });
@@ -386,10 +468,11 @@ public partial class UserFunctions
         }
     }
 
+
     [Function("UpdateUser")]
     public async Task<IActionResult> UpdateUser(
-        [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "users/{id:int}")] HttpRequest req,
-        int id)
+    [HttpTrigger(AuthorizationLevel.Anonymous, "put", Route = "users/{id:int}")] HttpRequest req,
+    int id)
     {
         try
         {
@@ -397,68 +480,121 @@ public partial class UserFunctions
             var dto = JsonSerializer.Deserialize<UpdateUserDto>(body, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
             if (dto == null || string.IsNullOrWhiteSpace(dto.UserName) || string.IsNullOrWhiteSpace(dto.Email))
-            {
                 return new BadRequestObjectResult("UserName and Email are required");
-            }
 
             using var conn = new SqlConnection(_configuration["SqlConnectionString"]);
             await conn.OpenAsync();
+            using var tx = conn.BeginTransaction();
 
-            // Check if email already exists for other users
-            var checkCmd = new SqlCommand("SELECT COUNT(1) FROM dbo.Users WHERE Email = @Email AND UserID != @UserID", conn);
-            checkCmd.Parameters.AddWithValue("@Email", dto.Email);
-            checkCmd.Parameters.AddWithValue("@UserID", id);
-            var exists = (int)await checkCmd.ExecuteScalarAsync() > 0;
-
-            if (exists)
+            try
             {
-                return new BadRequestObjectResult("Email already exists for another user");
+                // 1) Email uniqueness (same TX)
+                using (var check = new SqlCommand(
+                    "SELECT 1 FROM dbo.Users WHERE Email = @Email AND UserID <> @UserID", conn, tx))
+                {
+                    check.Parameters.Add("@Email", SqlDbType.NVarChar, 100).Value = dto.Email;
+                    check.Parameters.Add("@UserID", SqlDbType.Int).Value = id;
+                    var exists = (await check.ExecuteScalarAsync()) is not null;
+                    if (exists)
+                    {
+                        tx.Rollback();
+                        return new BadRequestObjectResult("Email already exists for another user");
+                    }
+                }
+
+                // 2) Update profile (optionally password)
+                var sql = @"
+                    UPDATE dbo.Users SET
+                        UserName=@UserName,
+                        Email=@Email,
+                        PhoneNo=@PhoneNo,
+                        UserType=@UserType,
+                        FingerprintEnabled=@FingerprintEnabled,
+                        IsEnabled=@IsEnabled"
+                        + (string.IsNullOrWhiteSpace(dto.Password) ? "" : ", Password=@Password")
+                        + " WHERE UserID=@UserID;";
+
+                using (var cmd = new SqlCommand(sql, conn, tx))
+                {
+                    cmd.Parameters.Add("@UserID", SqlDbType.Int).Value = id;
+                    cmd.Parameters.Add("@UserName", SqlDbType.NVarChar, 50).Value = dto.UserName;
+                    cmd.Parameters.Add("@Email", SqlDbType.NVarChar, 100).Value = dto.Email;
+                    cmd.Parameters.Add("@PhoneNo", SqlDbType.NVarChar, 20).Value = (object?)dto.PhoneNo ?? DBNull.Value;
+                    cmd.Parameters.Add("@UserType", SqlDbType.Int).Value = dto.UserType;
+
+                    // FingerprintEnabled might be nullable in your DTO; handle both cases cleanly
+                    var pFp = cmd.Parameters.Add("@FingerprintEnabled", SqlDbType.Bit);
+                    if (dto.FingerprintEnabled is bool fp) pFp.Value = fp; else pFp.Value = DBNull.Value;
+
+                    cmd.Parameters.Add("@IsEnabled", SqlDbType.Bit).Value = dto.IsEnabled;
+
+                    if (!string.IsNullOrWhiteSpace(dto.Password))
+                    {
+                        cmd.Parameters.Add("@Password", SqlDbType.NVarChar, 250).Value = dto.Password!;
+                    }
+
+                    var rows = await cmd.ExecuteNonQueryAsync();
+                    if (rows == 0)
+                    {
+                        tx.Rollback();
+                        return new NotFoundObjectResult("User not found");
+                    }
+                }
+
+                // 3) Merge guest mappings if BoxIds is provided (null = don't touch mappings)
+                if (dto.BoxIds is not null)
+                {
+                    var boxIdsJson = JsonSerializer.Serialize(dto.BoxIds);
+
+                    using var mergeCmd = new SqlCommand(@"
+                DECLARE @pUserID INT = @UserIDParam;
+                DECLARE @pBoxIdsJson NVARCHAR(MAX) = @BoxIdsJsonParam;
+
+                DECLARE @GuestRole INT = 0;  -- 0 = Guest, 1 = Owner (your schema)
+
+                -- Build table of BoxIDs from JSON (may be empty if '[]')
+                DECLARE @BoxIds TABLE (BoxID BIGINT PRIMARY KEY);
+
+                IF @pBoxIdsJson IS NOT NULL AND @pBoxIdsJson <> N''
+                BEGIN
+                    INSERT @BoxIds (BoxID)
+                    SELECT TRY_CAST([value] AS BIGINT)
+                    FROM OPENJSON(@pBoxIdsJson)
+                    WHERE TRY_CAST([value] AS BIGINT) IS NOT NULL;
+                END;
+
+                MERGE dbo.UserBoxes AS t
+                USING @BoxIds AS s
+                    ON (t.UserID = @pUserID AND t.BoxID = s.BoxID)
+
+                -- Insert missing as Guest
+                WHEN NOT MATCHED BY TARGET THEN
+                    INSERT (UserID, BoxID, UserRole, FingerprintNum)
+                    VALUES (@pUserID, s.BoxID, @GuestRole, NULL)
+
+                -- Delete only Guest rows not in the new list (owners remain untouched)
+                WHEN NOT MATCHED BY SOURCE
+                    AND t.UserID = @pUserID
+                    AND t.UserRole = @GuestRole
+                THEN
+                DELETE;
+                ", conn, tx);
+
+                    mergeCmd.Parameters.Add("@UserIDParam", SqlDbType.Int).Value = id;
+                    mergeCmd.Parameters.Add("@BoxIdsJsonParam", SqlDbType.NVarChar, -1).Value = (object)boxIdsJson ?? DBNull.Value;
+
+                    await mergeCmd.ExecuteNonQueryAsync();
+                }
+
+                // 4) Commit both changes
+                tx.Commit();
+                return new OkObjectResult(new { Message = "User updated successfully" });
             }
-
-            // Build dynamic update query based on provided fields
-            var updateFields = new List<string>
-        {
-            "UserName = @UserName",
-            "Email = @Email",
-            "PhoneNo = @PhoneNo",
-            "UserType = @UserType",
-            "FingerprintEnabled = @FingerprintEnabled",
-            "IsEnabled = @IsEnabled"
-        };
-
-            if (!string.IsNullOrWhiteSpace(dto.Password))
+            catch (Exception exInner)
             {
-                updateFields.Add("Password = @Password");
+                try { tx.Rollback(); } catch { /* ignore */ }
+                return new BadRequestObjectResult($"Error: {exInner.Message}");
             }
-
-            var sql = $@"
-            UPDATE dbo.Users 
-            SET {string.Join(", ", updateFields)}
-            WHERE UserID = @UserID";
-
-            var cmd = new SqlCommand(sql, conn);
-
-            cmd.Parameters.AddWithValue("@UserID", id);
-            cmd.Parameters.AddWithValue("@UserName", dto.UserName);
-            cmd.Parameters.AddWithValue("@Email", dto.Email);
-            cmd.Parameters.AddWithValue("@PhoneNo", (object?)dto.PhoneNo ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@UserType", dto.UserType);
-            cmd.Parameters.AddWithValue("@FingerprintEnabled", (object?)dto.FingerprintEnabled ?? DBNull.Value);
-            cmd.Parameters.AddWithValue("@IsEnabled", (object?)dto.IsEnabled ?? DBNull.Value);
-
-            if (!string.IsNullOrWhiteSpace(dto.Password))
-            {
-                cmd.Parameters.AddWithValue("@Password", dto.Password); // Assume password is already hashed from client
-            }
-
-            var rowsAffected = await cmd.ExecuteNonQueryAsync();
-
-            if (rowsAffected == 0)
-            {
-                return new NotFoundObjectResult("User not found");
-            }
-
-            return new OkObjectResult(new { Message = "User updated successfully" });
         }
         catch (Exception ex)
         {
@@ -473,30 +609,77 @@ public partial class UserFunctions
     {
         try
         {
-            using var conn = new SqlConnection(_configuration["SqlConnectionString"]);
+            await using var conn = new SqlConnection(_configuration["SqlConnectionString"]);
             await conn.OpenAsync();
+            await using var tx = conn.BeginTransaction();
 
-            var sql = $@"
-            DELETE FROM dbo.Users 
-            WHERE UserID = @UserID";
-
-            var cmd = new SqlCommand(sql, conn);
-            cmd.Parameters.AddWithValue("@UserID", id);
-
-            var rowsAffected = await cmd.ExecuteNonQueryAsync();
-
-            if (rowsAffected == 0)
+            try
             {
-                return new NotFoundObjectResult("User not found");
-            }
+                // 0) Ensure the user exists
+                await using (var existsCmd = new SqlCommand(
+                    "SELECT 1 FROM dbo.Users WHERE UserID = @UserID", conn, tx))
+                {
+                    existsCmd.Parameters.Add("@UserID", SqlDbType.Int).Value = id;
+                    var exists = (await existsCmd.ExecuteScalarAsync()) is not null;
+                    if (!exists)
+                    {
+                        await tx.RollbackAsync();
+                        return new NotFoundObjectResult("User not found");
+                    }
+                }
 
-            return new OkObjectResult(new { Message = "User updated successfully" });
+                // 1) Block deletion if the user is OWNER of any box (UserRole = 1)
+                await using (var ownerCheck = new SqlCommand(
+                    "SELECT TOP (1) 1 FROM dbo.UserBoxes WHERE UserID = @UserID AND UserRole = 1", conn, tx))
+                {
+                    ownerCheck.Parameters.Add("@UserID", SqlDbType.Int).Value = id;
+                    var isOwner = (await ownerCheck.ExecuteScalarAsync()) is not null;
+                    if (isOwner)
+                    {
+                        await tx.RollbackAsync();
+                        return new BadRequestObjectResult(
+                            "Cannot delete user: the user is the owner of one or more boxes. Transfer ownership first.");
+                    }
+                }
+
+                // 2) Delete mappings first (guests/managers)
+                await using (var delMaps = new SqlCommand(
+                    "DELETE FROM dbo.UserBoxes WHERE UserID = @UserID", conn, tx))
+                {
+                    delMaps.Parameters.Add("@UserID", SqlDbType.Int).Value = id;
+                    await delMaps.ExecuteNonQueryAsync();
+                }
+
+                // 3) Delete the user
+                int userRows;
+                await using (var delUser = new SqlCommand(
+                    "DELETE FROM dbo.Users WHERE UserID = @UserID", conn, tx))
+                {
+                    delUser.Parameters.Add("@UserID", SqlDbType.Int).Value = id;
+                    userRows = await delUser.ExecuteNonQueryAsync();
+                }
+
+                if (userRows == 0)
+                {
+                    await tx.RollbackAsync();
+                    return new NotFoundObjectResult("User not found");
+                }
+
+                await tx.CommitAsync();
+                return new OkObjectResult(new { Message = "User deleted successfully" });
+            }
+            catch (Exception exInner)
+            {
+                try { await tx.RollbackAsync(); } catch { /* ignore */ }
+                return new BadRequestObjectResult($"Error: {exInner.Message}");
+            }
         }
         catch (Exception ex)
         {
             return new BadRequestObjectResult($"Error: {ex.Message}");
         }
     }
+
 
     [Function("CheckFingerprintStatus")]
     public async Task<IActionResult> CheckFingerprintStatus(
@@ -639,7 +822,7 @@ public partial class UserFunctions
                     ub.FingerprintNum AS UserFingerprintNum,
                     u.UserID
                 FROM dbo.Boxes AS b
-                LEFT JOIN dbo.UserBoxes AS ub ON ub.BoxID = b.BoxID AND ub.UserID = @UserID 
+                INNER JOIN dbo.UserBoxes AS ub ON ub.BoxID = b.BoxID AND ub.UserID = @UserID 
                 LEFT JOIN dbo.Users AS u ON u.UserID = @UserID 
                 OUTER APPLY (
                     SELECT TOP (1) s.*

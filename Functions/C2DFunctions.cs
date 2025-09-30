@@ -127,7 +127,8 @@ public class A2DFunctions
             await conn.OpenAsync();
 
             var sql = $@"
-            DELETE FROM dbo.UserBoxes 
+            UPDATE dbo.UserBoxes 
+            SET FingerprintNum = NULL
             WHERE UserID = @UserID AND BoxID = @BoxID";
 
             var cmd = new SqlCommand(sql, conn);
