@@ -103,7 +103,7 @@ public class TransactionFunctions
                                 EventCode = ConvertDBValue.ReadString(reader, "EventCode"),
                                 DoorState = ConvertDBValue.ReadInt64(reader, "DoorState"),
                                 FingerprintNum = ConvertDBValue.ReadInt64(reader, "FingerprintNum"),
-                                TotalWeight = ConvertDBValue.ReadInt64(reader, "TotalWeight"),
+                                TotalWeight = ConvertDBValue.ReadFloat(reader, "TotalWeight"),
                                 BoxPosition = ConvertDBValue.ReadInt64(reader, "BoxPosition"),
                                 SecurityStatus = ConvertDBValue.ReadInt64(reader, "SecurityStatus"),
                                 EventDescription = ConvertDBValue.ReadString(reader, "EventDescription"),

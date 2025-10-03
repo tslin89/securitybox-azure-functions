@@ -644,7 +644,9 @@ public partial class UserFunctions
 
                 // 2) Delete mappings first (guests/managers)
                 await using (var delMaps = new SqlCommand(
-                    "DELETE FROM dbo.UserBoxes WHERE UserID = @UserID", conn, tx))
+                    @"
+                    DELETE FROM PushSubscriptions where UserId = @UserID; 
+                    DELETE FROM dbo.UserBoxes WHERE UserID = @UserID;", conn, tx))
                 {
                     delMaps.Parameters.Add("@UserID", SqlDbType.Int).Value = id;
                     await delMaps.ExecuteNonQueryAsync();
