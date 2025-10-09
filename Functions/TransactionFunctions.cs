@@ -78,10 +78,13 @@ public class TransactionFunctions
                 // Then get the paginated data
                 var query = $@"
                 SELECT 
-                    s.Id, s.TIMESTAMP, s.BoxID, s.EventCode, s.DoorState, s.FingerprintNum, s.TotalWeight, 
+                    s.Id, s.TIMESTAMP, s.BoxID, b.[Description] as 'BoxName', s.EventCode, s.DoorState, s.FingerprintNum, ISNULL(u.UserName, s.FingerprintNum) as 'FingerprintUser', s.TotalWeight, 
                     s.BoxPosition, s.SecurityStatus, ISNULL(e.EventDescription, 'UNKNOWN') AS EventDescription, e.EventType, e.IsC2D
                 FROM SecurityBoxData AS s
                 LEFT JOIN dbo.EventCodes as e ON e.EventCode = s.EventCode 
+                LEFT JOIN dbo.Boxes as b ON b.BoxID = s.BoxID
+                LEFT JOIN dbo.UserBoxes as ub ON ub.FingerprintNum = s.FingerprintNum
+                LEFT JOIN dbo.Users as u ON u.UserID = ub.UserID 
                 ORDER BY {sortField} {sortDirection.ToUpper()}
                 OFFSET @Offset ROWS 
                 FETCH NEXT @PageSize ROWS ONLY";
@@ -108,7 +111,9 @@ public class TransactionFunctions
                                 SecurityStatus = ConvertDBValue.ReadInt64(reader, "SecurityStatus"),
                                 EventDescription = ConvertDBValue.ReadString(reader, "EventDescription"),
                                 EventType = ConvertDBValue.ReadInt32(reader, "EventType"),
-                                IsC2D = ConvertDBValue.ReadInt32(reader, "IsC2D")
+                                IsC2D = ConvertDBValue.ReadInt32(reader, "IsC2D"),
+                                BoxName = ConvertDBValue.ReadString(reader, "BoxName"),
+                                FingerprintUser = ConvertDBValue.ReadString(reader, "FingerprintUser")
                             });
                         }
                     }

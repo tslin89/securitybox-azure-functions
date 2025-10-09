@@ -24,6 +24,8 @@ namespace SecurityBoxFunctions.Model.Entities
         public string EventDescription { get; set; }
         public int EventType { get; set; }
         public int IsC2D { get; set; }
+        public string BoxName { get; set; }
+        public string FingerprintUser { get; set; }
     }
 
     public class UserBoxData : SecurityBoxData
